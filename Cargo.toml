@@ -1,0 +1,53 @@
+[package]
+name = "kana"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "GPL-3.0"
+description = "Quantum mechanics simulation — state vectors, operators, entanglement, quantum circuits"
+homepage = "https://github.com/MacCracken/kana"
+repository = "https://github.com/MacCracken/kana"
+readme = "README.md"
+documentation = "https://docs.rs/kana"
+keywords = ["quantum", "physics", "simulation", "hilbert-space", "entanglement"]
+categories = ["science", "simulation"]
+exclude = [".claude/", ".github/", "docs/", "scripts/"]
+
+[features]
+default = ["state", "operator", "entanglement", "circuit"]
+state = []
+operator = []
+entanglement = []
+circuit = []
+ai = ["dep:reqwest", "dep:tokio", "dep:serde_json"]
+logging = ["dep:tracing-subscriber"]
+full = ["state", "operator", "entanglement", "circuit", "ai", "logging"]
+
+[dependencies]
+hisab = "0.22.4"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+
+# Optional
+reqwest = { version = "0.12", features = ["json"], optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+serde_json = { version = "1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+required-features = ["state", "operator", "entanglement", "circuit"]
+
+[[test]]
+name = "integration"
+required-features = ["state", "operator", "entanglement", "circuit"]
+
+[[example]]
+name = "basic_quantum"
+required-features = ["state", "operator"]
