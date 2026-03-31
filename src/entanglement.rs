@@ -108,7 +108,7 @@ impl DensityMatrix {
     /// For density matrices from physical quantum states, the real part
     /// captures the full eigenvalue spectrum.
     #[must_use]
-    pub(crate) fn hermitian_eigenvalues(&self) -> Vec<f64> {
+    pub fn hermitian_eigenvalues(&self) -> Vec<f64> {
         let n = self.dim;
 
         // Extract real-symmetric matrix

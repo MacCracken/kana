@@ -47,7 +47,7 @@ pub use state::{NORM_TOLERANCE, StateVector};
 pub use operator::Operator;
 
 #[cfg(feature = "entanglement")]
-pub use entanglement::DensityMatrix;
+pub use entanglement::{DensityMatrix, NoiseChannel};
 
 #[cfg(feature = "circuit")]
 pub use circuit::Circuit;

@@ -228,3 +228,101 @@ fn test_bloch_roundtrip() {
     let dm = entanglement::tomography_single_qubit(x, y, z);
     assert!((dm.purity() - 1.0).abs() < 1e-10);
 }
+
+#[test]
+fn test_deutsch_jozsa_constant_oracle() {
+    // Constant f(x) = 0 → all inputs measure 0
+    let c = Circuit::deutsch_jozsa(2, |_circuit, _inputs, _output| {});
+    let (_state, results) = c.execute_with_measurement(&[0.5, 0.5]).unwrap();
+    assert!(results.iter().all(|&(_, bit)| bit == 0));
+}
+
+#[test]
+fn test_deutsch_jozsa_balanced_oracle() {
+    // Balanced f(x) = x₀ → at least one input measures 1
+    let c = Circuit::deutsch_jozsa(2, |circuit, inputs, output| {
+        circuit.cnot(inputs[0], output).unwrap();
+    });
+    let (_state, results) = c.execute_with_measurement(&[0.5, 0.5]).unwrap();
+    assert!(results.iter().any(|&(_, bit)| bit == 1));
+}
+
+#[test]
+fn test_qft_inverse_qft_roundtrip() {
+    // QFT then inverse QFT should return to |00⟩
+    let qft = Circuit::qft(2);
+    let state = qft.execute().unwrap();
+    let iqft = Circuit::inverse_qft(2);
+    let result = iqft.execute_on(state).unwrap();
+    assert!((result.probability(0).unwrap() - 1.0).abs() < 1e-5);
+}
+
+#[test]
+fn test_qft_3q_roundtrip() {
+    let qft = Circuit::qft(3);
+    let state = qft.execute().unwrap();
+    let iqft = Circuit::inverse_qft(3);
+    let result = iqft.execute_on(state).unwrap();
+    assert!((result.probability(0).unwrap() - 1.0).abs() < 1e-5);
+}
+
+#[test]
+fn test_grover_2q_finds_target() {
+    // 2-qubit Grover searching for |11⟩, 1 iteration (optimal for N=4)
+    let c = Circuit::grover(2, 1, |circuit, qubits| {
+        // Oracle: flip phase of |11⟩ via CZ
+        circuit.cz(qubits[0], qubits[1]).unwrap();
+    });
+    let (_state, results) = c.execute_with_measurement(&[0.5, 0.5]).unwrap();
+    // Should find |11⟩ with high probability
+    assert_eq!(results[0].1, 1);
+    assert_eq!(results[1].1, 1);
+}
+
+#[test]
+fn test_vqe_ansatz_executes() {
+    // 2-qubit, 1-layer VQE with zero params → should produce |00⟩
+    let params = vec![0.0; 4];
+    let c = Circuit::vqe_ansatz(2, 1, &params).unwrap();
+    let result = c.execute().unwrap();
+    assert!((result.probability(0).unwrap() - 1.0).abs() < 1e-10);
+}
+
+#[test]
+fn test_rotation_gates_unitarity() {
+    use std::f64::consts::PI;
+    // Rx(θ)†Rx(θ) = I
+    let rx = Operator::rx(PI / 3.0);
+    let rxd = rx.dagger();
+    let product = rxd.multiply(&rx).unwrap();
+    let id = Operator::identity(2);
+    for i in 0..2 {
+        for j in 0..2 {
+            let (p_re, p_im) = product.element(i, j).unwrap();
+            let (i_re, i_im) = id.element(i, j).unwrap();
+            assert!((p_re - i_re).abs() < 1e-10);
+            assert!((p_im - i_im).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn test_noise_channel_on_circuit_output() {
+    // Run a circuit, convert to density matrix, apply noise
+    let mut c = Circuit::new(1);
+    c.hadamard(0).unwrap();
+    let state = c.execute().unwrap();
+    let amps: Vec<(f64, f64)> = (0..2).map(|i| state.amplitude(i).unwrap()).collect();
+    let dm = entanglement::DensityMatrix::from_pure_state(&amps);
+
+    let noisy = entanglement::NoiseChannel::depolarizing(0.5)
+        .unwrap()
+        .apply(&dm)
+        .unwrap();
+    // Noisy state should have lower purity
+    assert!(noisy.purity() < dm.purity());
+    // But trace should still be 1
+    let (tr_re, tr_im) = noisy.trace();
+    assert!((tr_re - 1.0).abs() < 1e-10);
+    assert!(tr_im.abs() < 1e-10);
+}

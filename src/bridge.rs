@@ -210,6 +210,20 @@ pub fn commutator(
     operator_from_matrix(&result)
 }
 
+/// Compute the anticommutator {A, B} = AB + BA using hisab.
+#[cfg(feature = "operator")]
+pub fn anticommutator(
+    a: &crate::operator::Operator,
+    b: &crate::operator::Operator,
+) -> Result<crate::operator::Operator> {
+    let ma = operator_to_matrix(a)?;
+    let mb = operator_to_matrix(b)?;
+    let result = hisab::num::anticommutator(&ma, &mb).map_err(|e| KanaError::InvalidParameter {
+        reason: format!("anticommutator failed: {e}"),
+    })?;
+    operator_from_matrix(&result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +331,23 @@ mod tests {
                 // [X,Y] = 2iZ: (re, im) → 2*(-z_im, z_re)
                 assert!((c_re - 2.0 * (-z_im)).abs() < 1e-10);
                 assert!((c_im - 2.0 * z_re).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[cfg(feature = "operator")]
+    #[test]
+    fn test_anticommutator_pauli() {
+        // {X, X} = 2I
+        let x = crate::operator::Operator::pauli_x();
+        let result = anticommutator(&x, &x).unwrap();
+        let id = crate::operator::Operator::identity(2);
+        for i in 0..2 {
+            for j in 0..2 {
+                let (r_re, r_im) = result.element(i, j).unwrap();
+                let (i_re, i_im) = id.element(i, j).unwrap();
+                assert!((r_re - 2.0 * i_re).abs() < 1e-10);
+                assert!((r_im - 2.0 * i_im).abs() < 1e-10);
             }
         }
     }

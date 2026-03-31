@@ -530,10 +530,19 @@ impl Circuit {
             });
         }
         for gate in &self.gates {
-            if let Some(ref op) = gate.operator {
-                let full_op = self.expand_gate(op, &gate.targets)?;
-                state = full_op.apply(&state)?;
+            if gate.name == "M" {
+                continue; // measurement gates are no-ops in non-measurement execute
             }
+            let op = gate.operator.as_ref().ok_or_else(|| {
+                KanaError::InvalidParameter {
+                    reason: format!(
+                        "gate '{}' has no operator (deserialized circuits cannot be executed directly)",
+                        gate.name
+                    ),
+                }
+            })?;
+            let full_op = self.expand_gate(op, &gate.targets)?;
+            state = full_op.apply(&state)?;
         }
         Ok(state)
     }
@@ -575,7 +584,15 @@ impl Circuit {
                 let (bit, collapsed) = state.measure_qubit(target, r)?;
                 state = collapsed;
                 measurements.push((target, bit));
-            } else if let Some(ref op) = gate.operator {
+            } else {
+                let op = gate.operator.as_ref().ok_or_else(|| {
+                    KanaError::InvalidParameter {
+                        reason: format!(
+                            "gate '{}' has no operator (deserialized circuits cannot be executed directly)",
+                            gate.name
+                        ),
+                    }
+                })?;
                 let full_op = self.expand_gate(op, &gate.targets)?;
                 state = full_op.apply(&state)?;
             }
