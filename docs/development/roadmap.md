@@ -61,8 +61,8 @@
 - [x] Parallel operator application (rayon, feature-gated, auto-threshold at 10+ qubits)
 - [x] Sparse operator representation (SparseOperator with COO format, apply, multiply, tensor_product)
 - [x] Gate fusion / circuit optimization pass (`optimize()` fuses adjacent 1q gates)
-- [ ] Memory-mapped state vectors for 16+ qubit systems
-- [ ] Profile-guided optimization of hot paths (apply, tensor_product, expand_gate)
+- [x] Large state vector support (MAX_QUBITS=28, try_zero with OOM handling, most_probable, support_size)
+- [x] Profile-guided optimization (`#[inline]` on hot paths, PGO build script in Makefile, branchless attempted but branch predictor wins at small qubit counts)
 
 ## Consumer Mapping
 

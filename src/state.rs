@@ -11,7 +11,10 @@ use crate::error::{KanaError, Result};
 pub const NORM_TOLERANCE: f64 = 1e-10;
 
 /// Maximum number of qubits supported (prevents overflow in 2^n dimension).
-pub const MAX_QUBITS: usize = 24;
+///
+/// At 28 qubits, the state vector is 2^28 × 16 bytes = 4 GiB.
+/// The OS page cache handles virtual memory transparently.
+pub const MAX_QUBITS: usize = 28;
 
 /// A quantum state vector in the computational basis.
 ///
@@ -54,6 +57,14 @@ impl StateVector {
         &mut self.amplitudes
     }
 
+    /// Compute the memory required for an n-qubit state vector in bytes.
+    #[inline]
+    #[must_use]
+    pub const fn memory_bytes(num_qubits: usize) -> usize {
+        // 2^n amplitudes × 2 f64 per amplitude × 8 bytes per f64
+        (1 << num_qubits) * 16
+    }
+
     /// Create the |0⟩ state for n qubits (all zeros computational basis state).
     ///
     /// # Panics
@@ -61,17 +72,34 @@ impl StateVector {
     /// Panics if `num_qubits` is 0 or exceeds `MAX_QUBITS`.
     #[must_use]
     pub fn zero(num_qubits: usize) -> Self {
-        assert!(
-            num_qubits > 0 && num_qubits <= MAX_QUBITS,
-            "num_qubits must be 1..={MAX_QUBITS}, got {num_qubits}"
-        );
-        let dim = 1 << num_qubits;
-        let mut amps = vec![(0.0, 0.0); dim];
+        Self::try_zero(num_qubits).expect("failed to allocate state vector")
+    }
+
+    /// Try to create the |0⟩ state, returning an error instead of panicking
+    /// if `num_qubits` is invalid or allocation fails.
+    ///
+    /// For 16+ qubits, consider checking `memory_bytes()` first.
+    pub fn try_zero(num_qubits: usize) -> Result<Self> {
+        if num_qubits == 0 || num_qubits > MAX_QUBITS {
+            return Err(KanaError::InvalidParameter {
+                reason: format!("num_qubits must be 1..={MAX_QUBITS}, got {num_qubits}"),
+            });
+        }
+        let dim = 1usize << num_qubits;
+        let mut amps = Vec::new();
+        amps.try_reserve_exact(dim)
+            .map_err(|_| KanaError::InvalidParameter {
+                reason: format!(
+                    "cannot allocate {} bytes for {num_qubits}-qubit state",
+                    Self::memory_bytes(num_qubits)
+                ),
+            })?;
+        amps.resize(dim, (0.0, 0.0));
         amps[0] = (1.0, 0.0);
-        Self {
+        Ok(Self {
             amplitudes: amps,
             num_qubits,
-        }
+        })
     }
 
     /// Create the |1⟩ state for a single qubit.
@@ -156,6 +184,30 @@ impl StateVector {
             .iter()
             .map(|(re, im)| re * re + im * im)
             .collect()
+    }
+
+    /// Find the most probable basis state and its probability.
+    ///
+    /// For large systems this avoids allocating a full probability vector.
+    #[must_use]
+    pub fn most_probable(&self) -> (usize, f64) {
+        self.amplitudes
+            .iter()
+            .enumerate()
+            .map(|(i, (re, im))| (i, re * re + im * im))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or((0, 0.0))
+    }
+
+    /// Count of non-negligible basis states (probability > tolerance).
+    ///
+    /// Useful for understanding effective dimension of the state.
+    #[must_use]
+    pub fn support_size(&self) -> usize {
+        self.amplitudes
+            .iter()
+            .filter(|(re, im)| re * re + im * im > NORM_TOLERANCE)
+            .count()
     }
 
     /// Inner product ⟨self|other⟩.
@@ -607,5 +659,48 @@ mod tests {
     fn test_bloch_multi_qubit_rejected() {
         let s = StateVector::zero(2);
         assert!(s.bloch_angles().is_err());
+    }
+
+    #[test]
+    fn test_try_zero_valid() {
+        let s = StateVector::try_zero(4).unwrap();
+        assert_eq!(s.num_qubits(), 4);
+        assert_eq!(s.dimension(), 16);
+    }
+
+    #[test]
+    fn test_try_zero_invalid() {
+        assert!(StateVector::try_zero(0).is_err());
+        assert!(StateVector::try_zero(29).is_err()); // > MAX_QUBITS
+    }
+
+    #[test]
+    fn test_memory_bytes() {
+        assert_eq!(StateVector::memory_bytes(1), 32); // 2 × 16
+        assert_eq!(StateVector::memory_bytes(10), 16384); // 1024 × 16
+    }
+
+    #[test]
+    fn test_most_probable() {
+        let s = StateVector::zero(2);
+        let (idx, prob) = s.most_probable();
+        assert_eq!(idx, 0);
+        assert!((prob - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_most_probable_superposition() {
+        let s = StateVector::plus();
+        let (_idx, prob) = s.most_probable();
+        assert!((prob - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_support_size() {
+        let s = StateVector::zero(3);
+        assert_eq!(s.support_size(), 1); // only |000⟩
+
+        let s = StateVector::plus();
+        assert_eq!(s.support_size(), 2); // |0⟩ and |1⟩
     }
 }

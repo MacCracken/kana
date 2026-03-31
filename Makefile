@@ -1,4 +1,4 @@
-.PHONY: check fmt clippy test audit deny vet semver bench coverage build doc clean all
+.PHONY: check fmt clippy test audit deny vet semver bench coverage build build-pgo doc clean all
 
 # Run all CI checks locally
 check: fmt clippy test audit
@@ -42,6 +42,19 @@ coverage:
 # Build release
 build:
 	cargo build --release --all-features
+
+# Build with Profile-Guided Optimization (PGO)
+# Step 1: build instrumented, Step 2: run benchmarks, Step 3: build optimized
+build-pgo:
+	@echo "=== PGO Step 1: Instrumented build ==="
+	RUSTFLAGS="-Cprofile-generate=/tmp/kana-pgo" cargo build --release --all-features
+	@echo "=== PGO Step 2: Gathering profile data from benchmarks ==="
+	RUSTFLAGS="-Cprofile-generate=/tmp/kana-pgo" cargo bench --all-features -- --quick
+	@echo "=== PGO Step 3: Merging profile data ==="
+	llvm-profdata merge -o /tmp/kana-pgo/merged.profdata /tmp/kana-pgo/
+	@echo "=== PGO Step 4: Optimized build ==="
+	RUSTFLAGS="-Cprofile-use=/tmp/kana-pgo/merged.profdata -Cllvm-args=-pgo-warn-missing-function" cargo build --release --all-features
+	@echo "=== PGO build complete ==="
 
 # Generate documentation
 doc:

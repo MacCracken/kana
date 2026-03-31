@@ -641,7 +641,8 @@ impl Circuit {
     /// Apply a 2×2 gate directly to state amplitudes on target qubit.
     ///
     /// For each pair of amplitudes where the target qubit differs (0 vs 1),
-    /// apply the 2×2 matrix. O(2^n) instead of O(4^n).
+    /// apply the 2×2 matrix. O(2^n) work, O(2^(n-1)) iterations.
+    #[inline]
     pub(crate) fn apply_single_qubit_direct(
         state: &mut StateVector,
         gate: &Operator,
@@ -659,11 +660,11 @@ impl Circuit {
 
         for i in 0..amps.len() {
             if i & bit != 0 {
-                continue; // process each pair once, from the i where bit=0
+                continue;
             }
             let j = i | bit;
-            let (a_re, a_im) = amps[i]; // amplitude where target qubit = 0
-            let (b_re, b_im) = amps[j]; // amplitude where target qubit = 1
+            let (a_re, a_im) = amps[i];
+            let (b_re, b_im) = amps[j];
 
             amps[i] = (
                 u00_re * a_re - u00_im * a_im + u01_re * b_re - u01_im * b_im,
@@ -680,6 +681,7 @@ impl Circuit {
     ///
     /// For each group of 4 amplitudes where the two target qubits take all
     /// combinations (00, 01, 10, 11), apply the 4×4 matrix. O(2^n) per gate.
+    #[inline]
     pub(crate) fn apply_two_qubit_direct(
         state: &mut StateVector,
         gate: &Operator,
@@ -719,6 +721,7 @@ impl Circuit {
     ///
     /// For each group of 8 amplitudes where the three target qubits take all
     /// combinations (000..111), apply the 8×8 matrix. O(2^n) per gate.
+    #[inline]
     fn apply_three_qubit_direct(
         state: &mut StateVector,
         gate: &Operator,
