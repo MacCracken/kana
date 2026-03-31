@@ -48,6 +48,12 @@ impl StateVector {
         Ok(state)
     }
 
+    /// Mutable access to amplitudes for in-place gate application.
+    #[inline]
+    pub(crate) fn amplitudes_mut(&mut self) -> &mut [(f64, f64)] {
+        &mut self.amplitudes
+    }
+
     /// Create the |0⟩ state for n qubits (all zeros computational basis state).
     ///
     /// # Panics

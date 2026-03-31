@@ -160,6 +160,57 @@ fn circuit_benchmarks(c: &mut Criterion) {
         b.iter(|| black_box(c.execute()))
     });
 
+    group.bench_function("grover_2q", |b| {
+        let c = kana::circuit::Circuit::grover(2, 1, |circuit, qubits| {
+            circuit.cz(qubits[0], qubits[1]).unwrap();
+        });
+        b.iter(|| black_box(c.execute_with_measurement(&[0.5, 0.5])))
+    });
+
+    group.bench_function("vqe_2q_1layer", |b| {
+        let c = kana::circuit::Circuit::vqe_ansatz(2, 1, &[0.1; 4]).unwrap();
+        b.iter(|| black_box(c.execute()))
+    });
+
+    group.finish();
+}
+
+fn measurement_benchmarks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("measurement");
+
+    let plus = kana::state::StateVector::plus();
+    group.bench_function("measure_1q", |b| b.iter(|| black_box(plus.measure(0.5))));
+
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let bell =
+        kana::state::StateVector::new(vec![(s, 0.0), (0.0, 0.0), (0.0, 0.0), (s, 0.0)]).unwrap();
+    group.bench_function("measure_qubit_2q", |b| {
+        b.iter(|| black_box(bell.measure_qubit(0, 0.5)))
+    });
+
+    group.bench_function("sample_1q_100", |b| {
+        let rs: Vec<f64> = (0..100).map(|i| (i as f64) / 100.0).collect();
+        b.iter(|| black_box(plus.sample(&rs)))
+    });
+
+    group.bench_function("bloch_vector", |b| {
+        b.iter(|| black_box(plus.bloch_vector()))
+    });
+
+    group.finish();
+}
+
+fn rotation_benchmarks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("rotation");
+
+    group.bench_function("rx_create", |b| {
+        b.iter(|| black_box(kana::operator::Operator::rx(0.5)))
+    });
+
+    let rx = kana::operator::Operator::rx(0.5);
+    let state = kana::state::StateVector::zero(1);
+    group.bench_function("rx_apply_1q", |b| b.iter(|| black_box(rx.apply(&state))));
+
     group.finish();
 }
 
@@ -193,5 +244,7 @@ criterion_group!(
     entanglement_benchmarks,
     circuit_benchmarks,
     noise_benchmarks,
+    measurement_benchmarks,
+    rotation_benchmarks,
 );
 criterion_main!(benches);

@@ -5,16 +5,16 @@
 **Kana** (Sanskrit: कण — particle, atom) — Quantum mechanics simulation — state vectors, operators, entanglement, circuits
 
 - **Type**: Flat crate (library)
-- **License**: GPL-3.0
-- **Version**: 0.1.0
+- **License**: GPL-3.0-only
+- **Version**: 1.0.0
 
 ## Consumers
 
 joshua (simulation layer), kiran (game engine, via joshua)
 
-**Foundation**: hisab (complex linear algebra, tensor products)
+**Foundation**: hisab (complex linear algebra, tensor products — via `hisab-bridge` feature)
 
-**Modules**: state, operator, entanglement, circuit, error, ai, logging
+**Modules**: state, operator, entanglement, circuit, bridge, error, ai, logging
 
 ## Development Process
 

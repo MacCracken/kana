@@ -522,6 +522,10 @@ impl Circuit {
     }
 
     /// Execute the circuit on a given initial state.
+    ///
+    /// Uses direct statevector simulation for 1 and 2-qubit gates (O(2^n) per gate)
+    /// instead of full matrix expansion (O(4^n)). Falls back to matrix expansion
+    /// for 3-qubit gates.
     pub fn execute_on(&self, mut state: StateVector) -> Result<StateVector> {
         if state.num_qubits() != self.num_qubits {
             return Err(KanaError::DimensionMismatch {
@@ -531,20 +535,97 @@ impl Circuit {
         }
         for gate in &self.gates {
             if gate.name == "M" {
-                continue; // measurement gates are no-ops in non-measurement execute
+                continue;
             }
-            let op = gate.operator.as_ref().ok_or_else(|| {
-                KanaError::InvalidParameter {
-                    reason: format!(
-                        "gate '{}' has no operator (deserialized circuits cannot be executed directly)",
-                        gate.name
-                    ),
-                }
+            let op = gate.operator.as_ref().ok_or_else(|| KanaError::InvalidParameter {
+                reason: format!(
+                    "gate '{}' has no operator (deserialized circuits cannot be executed directly)",
+                    gate.name
+                ),
             })?;
-            let full_op = self.expand_gate(op, &gate.targets)?;
-            state = full_op.apply(&state)?;
+            match gate.targets.len() {
+                1 if op.dim() == 2 => {
+                    Self::apply_single_qubit_direct(&mut state, op, gate.targets[0]);
+                }
+                2 if op.dim() == 4 => {
+                    Self::apply_two_qubit_direct(&mut state, op, gate.targets[0], gate.targets[1]);
+                }
+                _ => {
+                    // Fallback: full matrix expansion for 3-qubit gates
+                    let full_op = self.expand_gate(op, &gate.targets)?;
+                    state = full_op.apply(&state)?;
+                }
+            }
         }
         Ok(state)
+    }
+
+    /// Apply a 2×2 gate directly to state amplitudes on target qubit.
+    ///
+    /// For each pair of amplitudes where the target qubit differs (0 vs 1),
+    /// apply the 2×2 matrix. O(2^n) instead of O(4^n).
+    fn apply_single_qubit_direct(state: &mut StateVector, gate: &Operator, target: usize) {
+        let n = state.num_qubits();
+        let elems = gate.elements();
+        let (u00_re, u00_im) = elems[0];
+        let (u01_re, u01_im) = elems[1];
+        let (u10_re, u10_im) = elems[2];
+        let (u11_re, u11_im) = elems[3];
+
+        let bit = 1 << (n - 1 - target);
+        let amps = state.amplitudes_mut();
+
+        for i in 0..amps.len() {
+            if i & bit != 0 {
+                continue; // process each pair once, from the i where bit=0
+            }
+            let j = i | bit;
+            let (a_re, a_im) = amps[i]; // amplitude where target qubit = 0
+            let (b_re, b_im) = amps[j]; // amplitude where target qubit = 1
+
+            amps[i] = (
+                u00_re * a_re - u00_im * a_im + u01_re * b_re - u01_im * b_im,
+                u00_re * a_im + u00_im * a_re + u01_re * b_im + u01_im * b_re,
+            );
+            amps[j] = (
+                u10_re * a_re - u10_im * a_im + u11_re * b_re - u11_im * b_im,
+                u10_re * a_im + u10_im * a_re + u11_re * b_im + u11_im * b_re,
+            );
+        }
+    }
+
+    /// Apply a 4×4 gate directly to state amplitudes on two target qubits.
+    ///
+    /// For each group of 4 amplitudes where the two target qubits take all
+    /// combinations (00, 01, 10, 11), apply the 4×4 matrix. O(2^n) per gate.
+    fn apply_two_qubit_direct(state: &mut StateVector, gate: &Operator, q0: usize, q1: usize) {
+        let n = state.num_qubits();
+        let elems = gate.elements();
+        let bit0 = 1 << (n - 1 - q0);
+        let bit1 = 1 << (n - 1 - q1);
+        let amps = state.amplitudes_mut();
+
+        for i in 0..amps.len() {
+            // Only process when both target bits are 0 (process each group once)
+            if i & bit0 != 0 || i & bit1 != 0 {
+                continue;
+            }
+            let i00 = i;
+            let i01 = i | bit1;
+            let i10 = i | bit0;
+            let i11 = i | bit0 | bit1;
+
+            let a = [amps[i00], amps[i01], amps[i10], amps[i11]];
+            for (out_idx, &target_i) in [i00, i01, i10, i11].iter().enumerate() {
+                let (mut re, mut im) = (0.0, 0.0);
+                for (in_idx, &(s_re, s_im)) in a.iter().enumerate() {
+                    let (m_re, m_im) = elems[out_idx * 4 + in_idx];
+                    re += m_re * s_re - m_im * s_im;
+                    im += m_re * s_im + m_im * s_re;
+                }
+                amps[target_i] = (re, im);
+            }
+        }
     }
 
     /// Execute the circuit with measurement, using provided random values.
@@ -593,8 +674,23 @@ impl Circuit {
                         ),
                     }
                 })?;
-                let full_op = self.expand_gate(op, &gate.targets)?;
-                state = full_op.apply(&state)?;
+                match gate.targets.len() {
+                    1 if op.dim() == 2 => {
+                        Self::apply_single_qubit_direct(&mut state, op, gate.targets[0]);
+                    }
+                    2 if op.dim() == 4 => {
+                        Self::apply_two_qubit_direct(
+                            &mut state,
+                            op,
+                            gate.targets[0],
+                            gate.targets[1],
+                        );
+                    }
+                    _ => {
+                        let full_op = self.expand_gate(op, &gate.targets)?;
+                        state = full_op.apply(&state)?;
+                    }
+                }
             }
         }
         Ok((state, measurements))
