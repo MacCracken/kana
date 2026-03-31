@@ -1,6 +1,6 @@
 //! Error types for kana.
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
 pub enum KanaError {
     #[error("invalid state dimension: expected {expected}, got {got}")]

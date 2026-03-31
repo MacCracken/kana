@@ -1,16 +1,18 @@
 //! Quantum dynamics — time evolution for closed and open quantum systems.
 //!
 //! - **Schrödinger equation**: |ψ(t)⟩ = e^(−iHt) |ψ(0)⟩ for closed systems
-//! - **Lindblad master equation**: dρ/dt = −i[H,ρ] + Σₖ γₖ D[Lₖ](ρ) for open systems
-//!   where D[L](ρ) = LρL† − ½{L†L, ρ}
+//! - **Lindblad master equation**: dρ/dt = −i\[H,ρ\] + Σₖ γₖ D\[Lₖ\](ρ) for open systems
+//!   where D\[L\](ρ) = LρL† − ½{L†L, ρ}
 
 use crate::entanglement::DensityMatrix;
+use serde::{Deserialize, Serialize};
+
 use crate::error::{KanaError, Result};
 use crate::operator::Operator;
 use crate::state::StateVector;
 
 /// A Hamiltonian with optional Lindblad dissipators for open system dynamics.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hamiltonian {
     /// The Hermitian Hamiltonian operator H.
     operator: Operator,
@@ -132,7 +134,7 @@ impl Hamiltonian {
 
     /// Lindblad master equation evolution of a density matrix.
     ///
-    /// dρ/dt = −i[H,ρ] + Σₖ γₖ (Lₖ ρ Lₖ† − ½{Lₖ†Lₖ, ρ})
+    /// dρ/dt = −i\[H,ρ\] + Σₖ γₖ (Lₖ ρ Lₖ† − ½{Lₖ†Lₖ, ρ})
     ///
     /// Uses Euler method with the given time step. For accuracy, use small dt
     /// or call multiple times.
@@ -193,12 +195,12 @@ impl Hamiltonian {
         DensityMatrix::new(dim, current)
     }
 
-    /// Compute the Lindblad right-hand side: dρ/dt = −i[H,ρ] + dissipator terms.
+    /// Compute the Lindblad right-hand side: dρ/dt = −i\[H,ρ\] + dissipator terms.
     fn lindblad_rhs(&self, rho: &[(f64, f64)], dim: usize) -> Vec<(f64, f64)> {
         let h = self.operator.elements();
         let mut result = vec![(0.0, 0.0); dim * dim];
 
-        // Unitary part: −i[H,ρ] = −i(Hρ − ρH)
+        // Unitary part: −i[H,ρ] = −i(Hρ − ρH) (commutator)
         for i in 0..dim {
             for j in 0..dim {
                 let (mut re, mut im) = (0.0, 0.0);

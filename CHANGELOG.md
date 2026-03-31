@@ -29,15 +29,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **entanglement**: Noise channels via Kraus operators
 - **entanglement**: Depolarizing, amplitude damping, phase damping channels
 - **entanglement**: Noise model composition
+- **entanglement**: State fidelity, trace distance, partial transpose
+- **entanglement**: Negativity, log-negativity, mutual information, entanglement of formation
+- **entanglement**: Choi matrix representation, process fidelity, average gate fidelity
+- **entanglement**: DensityMatrix::validate (Hermitian, PSD, trace-1 checks)
+- **entanglement**: Kraus completeness validation in NoiseChannel::new
+- **operator**: ZYZ Euler decomposition and reconstruction
+- **operator**: KAK entangling structure estimation for two-qubit gates
+- **operator**: SparseOperator (COO format) with apply, multiply, tensor_product
+- **operator**: Rotation gates Rx, Ry, Rz, arbitrary Phase
+- **safe**: QuantumBuilder — ownership-based circuit builder with compile-time no-cloning enforcement
+- **safe**: Qubit (move-only), ClassicalBit types
+- **dynamics**: Hamiltonian with optional Lindblad dissipators
+- **dynamics**: Schrodinger evolution via matrix exponential
+- **dynamics**: Lindblad master equation evolution (RK4 integrator)
+- **dynamics**: expectation_value function
+- **bridge**: Hisab interop (Complex, ComplexMatrix conversions, kronecker, eigenvalues, matrix_exp, commutator, anticommutator)
+- **parallel**: Rayon-parallelized gate application (1/2/3-qubit, auto-threshold)
+- **parallel**: Parallel Born-rule sampling
+- **circuit**: Direct statevector simulation (10-58x faster than matrix expansion)
+- **circuit**: Gate fusion and inverse cancellation in optimize()
+- **circuit**: Periodic renormalization during long circuits
+- **circuit**: Arbitrary basis measurement
+- **state**: try_zero with OOM handling, most_probable, support_size, renormalize
+- Prelude module for convenient imports
+- Send+Sync compile-time trait assertions on all public types
 - NORM_TOLERANCE constant for floating-point comparisons
 
 ### Changed
 
-- Von Neumann entropy now uses Jacobi eigenvalue algorithm (exact for all sizes)
-- `operator::apply()` propagates actual normalization deviation instead of dummy value
-- `ai::register_agent()` validates response JSON instead of silent fallback
+- Von Neumann entropy uses 2n×2n real embedding Jacobi (handles complex Hermitian matrices)
+- `operator::apply()` uses direct slice access (no per-element bounds checking)
+- `ai::register_agent()` sends api_key as Bearer token, checks HTTP status
+- Lindblad integrator upgraded from Euler to RK4
+- MAX_QUBITS raised from 24 to 28 (4 GiB state vectors)
 - License identifier updated to SPDX `GPL-3.0-only`
-- hisab dependency updated to 1.4.0
+- hisab dependency updated to 1.4.0 (optional, feature-gated)
+- tokio features trimmed from "full" to "rt-multi-thread, macros"
+- Feature gates: circuit implies state+operator, entanglement implies state
 
 ## [0.1.0] — 2026-03-24
 

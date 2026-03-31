@@ -1,9 +1,15 @@
 //! Structured logging for kana via `KANA_LOG` env var.
 
+/// Initialize logging with the default level ("info").
+///
+/// Uses `KANA_LOG` env var to override. Safe to call multiple times.
 pub fn init() {
     init_with_level("info");
 }
 
+/// Initialize logging with a custom default level.
+///
+/// The `KANA_LOG` env var takes precedence over `default_level`.
 pub fn init_with_level(default_level: &str) {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt;

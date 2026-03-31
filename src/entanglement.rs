@@ -610,7 +610,7 @@ pub fn entanglement_of_formation(concurrence: f64) -> f64 {
 /// A quantum noise channel defined by Kraus operators.
 ///
 /// Applies ρ → Σₖ Eₖ ρ Eₖ† where the Eₖ satisfy Σₖ Eₖ†Eₖ = I.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoiseChannel {
     /// Kraus operators as (dim, elements) where elements are (re, im) pairs.
     kraus_ops: Vec<Vec<(f64, f64)>>,

@@ -83,73 +83,97 @@ impl QuantumBuilder {
 
     /// Hadamard gate. Consumes and returns the qubit.
     pub fn h(&mut self, q: Qubit) -> Qubit {
-        self.circuit.hadamard(q.index).unwrap();
+        self.circuit
+            .hadamard(q.index)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// Pauli-X gate.
     pub fn x(&mut self, q: Qubit) -> Qubit {
-        self.circuit.pauli_x(q.index).unwrap();
+        self.circuit
+            .pauli_x(q.index)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// Pauli-Y gate.
     pub fn y(&mut self, q: Qubit) -> Qubit {
-        self.circuit.pauli_y(q.index).unwrap();
+        self.circuit
+            .pauli_y(q.index)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// Pauli-Z gate.
     pub fn z(&mut self, q: Qubit) -> Qubit {
-        self.circuit.pauli_z(q.index).unwrap();
+        self.circuit
+            .pauli_z(q.index)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// S (phase) gate.
     pub fn s(&mut self, q: Qubit) -> Qubit {
-        self.circuit.phase_s(q.index).unwrap();
+        self.circuit
+            .phase_s(q.index)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// T gate.
     pub fn t(&mut self, q: Qubit) -> Qubit {
-        self.circuit.phase_t(q.index).unwrap();
+        self.circuit
+            .phase_t(q.index)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// Rx rotation gate.
     pub fn rx(&mut self, q: Qubit, theta: f64) -> Qubit {
-        self.circuit.rx(q.index, theta).unwrap();
+        self.circuit
+            .rx(q.index, theta)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// Ry rotation gate.
     pub fn ry(&mut self, q: Qubit, theta: f64) -> Qubit {
-        self.circuit.ry(q.index, theta).unwrap();
+        self.circuit
+            .ry(q.index, theta)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// Rz rotation gate.
     pub fn rz(&mut self, q: Qubit, theta: f64) -> Qubit {
-        self.circuit.rz(q.index, theta).unwrap();
+        self.circuit
+            .rz(q.index, theta)
+            .expect("qubit index valid by construction");
         q
     }
 
     /// CNOT (controlled-X) gate. Consumes and returns both qubits.
     pub fn cx(&mut self, control: Qubit, target: Qubit) -> (Qubit, Qubit) {
-        self.circuit.cnot(control.index, target.index).unwrap();
+        self.circuit
+            .cnot(control.index, target.index)
+            .expect("qubit index valid by construction");
         (control, target)
     }
 
     /// CZ (controlled-Z) gate.
     pub fn cz(&mut self, a: Qubit, b: Qubit) -> (Qubit, Qubit) {
-        self.circuit.cz(a.index, b.index).unwrap();
+        self.circuit
+            .cz(a.index, b.index)
+            .expect("qubit index valid by construction");
         (a, b)
     }
 
     /// SWAP gate.
     pub fn swap(&mut self, a: Qubit, b: Qubit) -> (Qubit, Qubit) {
-        self.circuit.swap(a.index, b.index).unwrap();
+        self.circuit
+            .swap(a.index, b.index)
+            .expect("qubit index valid by construction");
         // After swap, the qubit handles swap their logical meaning
         (b, a)
     }
@@ -158,7 +182,7 @@ impl QuantumBuilder {
     pub fn ccx(&mut self, c0: Qubit, c1: Qubit, target: Qubit) -> (Qubit, Qubit, Qubit) {
         self.circuit
             .toffoli(c0.index, c1.index, target.index)
-            .unwrap();
+            .expect("qubit index valid by construction");
         (c0, c1, target)
     }
 
@@ -166,7 +190,7 @@ impl QuantumBuilder {
     pub fn cswap(&mut self, control: Qubit, a: Qubit, b: Qubit) -> (Qubit, Qubit, Qubit) {
         self.circuit
             .fredkin(control.index, a.index, b.index)
-            .unwrap();
+            .expect("qubit index valid by construction");
         (control, b, a) // targets are swapped
     }
 
@@ -174,14 +198,16 @@ impl QuantumBuilder {
     pub fn cu(&mut self, control: Qubit, target: Qubit, u: &Operator) -> (Qubit, Qubit) {
         self.circuit
             .controlled_u(control.index, target.index, u)
-            .unwrap();
+            .expect("qubit index valid by construction");
         (control, target)
     }
 
     /// Measure a qubit. Consumes the qubit, returns a classical bit
     /// and the (collapsed) qubit handle.
     pub fn measure(&mut self, q: Qubit) -> (ClassicalBit, Qubit) {
-        self.circuit.measure(q.index).unwrap();
+        self.circuit
+            .measure(q.index)
+            .expect("qubit index valid by construction");
         (
             ClassicalBit {
                 qubit_index: q.index,
