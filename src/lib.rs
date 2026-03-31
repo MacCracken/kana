@@ -35,6 +35,9 @@ pub mod logging;
 #[cfg(feature = "ai")]
 pub mod ai;
 
+#[cfg(feature = "hisab-bridge")]
+pub mod bridge;
+
 pub use error::{KanaError, Result};
 
 #[cfg(feature = "state")]

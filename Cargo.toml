@@ -19,12 +19,13 @@ state = []
 operator = ["state"]
 entanglement = ["state"]
 circuit = ["state", "operator"]
+hisab-bridge = ["dep:hisab"]
 ai = ["dep:reqwest", "dep:tokio", "dep:serde_json"]
 logging = ["dep:tracing-subscriber"]
-full = ["state", "operator", "entanglement", "circuit", "ai", "logging"]
+full = ["state", "operator", "entanglement", "circuit", "hisab-bridge", "ai", "logging"]
 
 [dependencies]
-hisab = { version = "1.4.0", optional = true }
+hisab = { version = "1.4.0", optional = true, features = ["num"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
