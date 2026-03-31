@@ -160,6 +160,24 @@ fn circuit_benchmarks(c: &mut Criterion) {
         b.iter(|| black_box(c.execute()))
     });
 
+    // 10 sequential single-qubit gates on same qubit — shows fusion benefit
+    group.bench_function("10_gates_1q_unfused", |b| {
+        let mut c = kana::circuit::Circuit::new(1);
+        for _ in 0..10 {
+            c.hadamard(0).unwrap();
+        }
+        b.iter(|| black_box(c.execute()))
+    });
+
+    group.bench_function("10_gates_1q_fused", |b| {
+        let mut c = kana::circuit::Circuit::new(1);
+        for _ in 0..10 {
+            c.hadamard(0).unwrap();
+        }
+        let opt = c.optimize();
+        b.iter(|| black_box(opt.execute()))
+    });
+
     group.bench_function("grover_2q", |b| {
         let c = kana::circuit::Circuit::grover(2, 1, |circuit, qubits| {
             circuit.cz(qubits[0], qubits[1]).unwrap();

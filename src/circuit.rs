@@ -516,6 +516,46 @@ impl Circuit {
         Ok(())
     }
 
+    /// Return an optimized copy of this circuit with adjacent single-qubit
+    /// gates on the same target fused into single operators.
+    #[must_use]
+    pub fn optimize(&self) -> Self {
+        let mut optimized_gates: Vec<Gate> = Vec::new();
+
+        for gate in &self.gates {
+            // Only fuse single-qubit gates with operators
+            if gate.targets.len() == 1 && gate.operator.is_some() && gate.name != "M" {
+                let target = gate.targets[0];
+                // Check if the last optimized gate is also a single-qubit gate on same target
+                let can_fuse = optimized_gates.last().is_some_and(|prev| {
+                    prev.targets.len() == 1
+                        && prev.targets[0] == target
+                        && prev.operator.is_some()
+                        && prev.name != "M"
+                });
+                if can_fuse {
+                    let prev = optimized_gates.last_mut().unwrap();
+                    let fused = prev
+                        .operator
+                        .as_ref()
+                        .zip(gate.operator.as_ref())
+                        .and_then(|(prev_op, gate_op)| gate_op.multiply(prev_op).ok());
+                    if let Some(fused) = fused {
+                        prev.operator = Some(fused);
+                        prev.name = format!("{}+{}", prev.name, gate.name);
+                        continue;
+                    }
+                }
+            }
+            optimized_gates.push(gate.clone());
+        }
+
+        Self {
+            num_qubits: self.num_qubits,
+            gates: optimized_gates,
+        }
+    }
+
     /// Execute the circuit on the |0...0⟩ initial state.
     pub fn execute(&self) -> Result<StateVector> {
         self.execute_on(StateVector::zero(self.num_qubits))
@@ -1460,5 +1500,69 @@ mod tests {
         let result = rz_pi.apply(&plus).unwrap();
         // |−⟩ = (|0⟩ − |1⟩)/√2, probs still 0.5/0.5
         assert!((result.probability(0).unwrap() - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_optimize_fuses_adjacent_single_qubit() {
+        // H then Z on same qubit should fuse to 1 gate
+        let mut c = Circuit::new(1);
+        c.hadamard(0).unwrap();
+        c.pauli_z(0).unwrap();
+        c.pauli_x(0).unwrap();
+        assert_eq!(c.num_gates(), 3);
+
+        let opt = c.optimize();
+        assert_eq!(opt.num_gates(), 1);
+
+        // Results should match
+        let orig = c.execute().unwrap();
+        let optimized = opt.execute().unwrap();
+        for i in 0..2 {
+            let (a_re, a_im) = orig.amplitude(i).unwrap();
+            let (b_re, b_im) = optimized.amplitude(i).unwrap();
+            assert!((a_re - b_re).abs() < 1e-10);
+            assert!((a_im - b_im).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_optimize_preserves_different_targets() {
+        // H on q0, then X on q1 should NOT fuse
+        let mut c = Circuit::new(2);
+        c.hadamard(0).unwrap();
+        c.pauli_x(1).unwrap();
+        let opt = c.optimize();
+        assert_eq!(opt.num_gates(), 2);
+    }
+
+    #[test]
+    fn test_optimize_preserves_two_qubit_gates() {
+        // H, CNOT, H should not fuse across the CNOT
+        let mut c = Circuit::new(2);
+        c.hadamard(0).unwrap();
+        c.cnot(0, 1).unwrap();
+        c.hadamard(0).unwrap();
+        let opt = c.optimize();
+        assert_eq!(opt.num_gates(), 3); // H, CNOT, H — no fusion possible
+
+        let orig = c.execute().unwrap();
+        let optimized = opt.execute().unwrap();
+        for i in 0..4 {
+            let (a_re, a_im) = orig.amplitude(i).unwrap();
+            let (b_re, b_im) = optimized.amplitude(i).unwrap();
+            assert!((a_re - b_re).abs() < 1e-10);
+            assert!((a_im - b_im).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_optimize_preserves_measurements() {
+        let mut c = Circuit::new(1);
+        c.hadamard(0).unwrap();
+        c.measure(0).unwrap();
+        c.pauli_x(0).unwrap();
+        let opt = c.optimize();
+        // H, M, X — measurement breaks the chain, no fusion
+        assert_eq!(opt.num_gates(), 3);
     }
 }
