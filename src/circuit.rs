@@ -1121,6 +1121,133 @@ impl Circuit {
 
         Ok(full_op)
     }
+
+    /// Export the circuit as OpenQASM 2.0.
+    ///
+    /// Produces a valid QASM 2.0 program using the standard `qelib1.inc`
+    /// gate library. Rotation gate angles are extracted from the operator
+    /// matrix where possible.
+    ///
+    /// ```text
+    /// OPENQASM 2.0;
+    /// include "qelib1.inc";
+    /// qreg q[2];
+    /// creg c[2];
+    /// h q[0];
+    /// cx q[0], q[1];
+    /// measure q[0] -> c[0];
+    /// ```
+    #[must_use]
+    pub fn to_qasm(&self) -> String {
+        use fmt::Write;
+        let mut out = String::new();
+        writeln!(out, "OPENQASM 2.0;").unwrap();
+        writeln!(out, "include \"qelib1.inc\";").unwrap();
+        writeln!(out, "qreg q[{}];", self.num_qubits).unwrap();
+
+        // Count measurements to size classical register
+        let n_meas = self.gates.iter().filter(|g| g.name == "M").count();
+        if n_meas > 0 {
+            writeln!(out, "creg c[{n_meas}];").unwrap();
+        }
+
+        let mut meas_idx = 0;
+        for gate in &self.gates {
+            match gate.name.as_str() {
+                "H" => writeln!(out, "h q[{}];", gate.targets[0]).unwrap(),
+                "X" => writeln!(out, "x q[{}];", gate.targets[0]).unwrap(),
+                "Y" => writeln!(out, "y q[{}];", gate.targets[0]).unwrap(),
+                "Z" => writeln!(out, "z q[{}];", gate.targets[0]).unwrap(),
+                "S" => writeln!(out, "s q[{}];", gate.targets[0]).unwrap(),
+                "T" => writeln!(out, "t q[{}];", gate.targets[0]).unwrap(),
+                "Rx" => {
+                    let angle = Self::extract_rotation_angle(gate, 'x');
+                    writeln!(out, "rx({angle}) q[{}];", gate.targets[0]).unwrap();
+                }
+                "Ry" => {
+                    let angle = Self::extract_rotation_angle(gate, 'y');
+                    writeln!(out, "ry({angle}) q[{}];", gate.targets[0]).unwrap();
+                }
+                "Rz" => {
+                    let angle = Self::extract_rotation_angle(gate, 'z');
+                    writeln!(out, "rz({angle}) q[{}];", gate.targets[0]).unwrap();
+                }
+                "CNOT" => {
+                    writeln!(out, "cx q[{}], q[{}];", gate.targets[0], gate.targets[1]).unwrap();
+                }
+                "CZ" => {
+                    writeln!(out, "cz q[{}], q[{}];", gate.targets[0], gate.targets[1]).unwrap();
+                }
+                "SWAP" => {
+                    writeln!(out, "swap q[{}], q[{}];", gate.targets[0], gate.targets[1]).unwrap();
+                }
+                "CP" | "CU" => {
+                    // Controlled-phase / controlled-U: extract angle
+                    let angle = gate
+                        .operator
+                        .as_ref()
+                        .map(|op| {
+                            let e = op.elements();
+                            // CU[3,3] = e^(iθ), angle = atan2(im, re)
+                            e[15].1.atan2(e[15].0)
+                        })
+                        .unwrap_or(0.0);
+                    writeln!(
+                        out,
+                        "cu1({angle}) q[{}], q[{}];",
+                        gate.targets[0], gate.targets[1]
+                    )
+                    .unwrap();
+                }
+                "Toffoli" => {
+                    writeln!(
+                        out,
+                        "ccx q[{}], q[{}], q[{}];",
+                        gate.targets[0], gate.targets[1], gate.targets[2]
+                    )
+                    .unwrap();
+                }
+                "Fredkin" => {
+                    writeln!(
+                        out,
+                        "cswap q[{}], q[{}], q[{}];",
+                        gate.targets[0], gate.targets[1], gate.targets[2]
+                    )
+                    .unwrap();
+                }
+                "M" => {
+                    writeln!(out, "measure q[{}] -> c[{meas_idx}];", gate.targets[0]).unwrap();
+                    meas_idx += 1;
+                }
+                other => {
+                    // Custom/fused gate: emit as comment
+                    let targets: Vec<String> =
+                        gate.targets.iter().map(|t| format!("q[{t}]")).collect();
+                    writeln!(out, "// custom: {} {}", other, targets.join(", ")).unwrap();
+                }
+            }
+        }
+        out
+    }
+
+    /// Extract a rotation angle from a gate operator.
+    fn extract_rotation_angle(gate: &Gate, axis: char) -> f64 {
+        gate.operator
+            .as_ref()
+            .map(|op| {
+                let e = op.elements();
+                match axis {
+                    // Rx: [[cos, -isin], [-isin, cos]] → angle = 2*acos(re[0,0])
+                    'x' => 2.0 * e[0].0.clamp(-1.0, 1.0).acos(),
+                    // Ry: [[cos, -sin], [sin, cos]] → angle = 2*acos(re[0,0])
+                    'y' => 2.0 * e[0].0.clamp(-1.0, 1.0).acos(),
+                    // Rz: [[e^(-iθ/2), 0], [0, e^(iθ/2)]] → angle = -2*arg(e[0,0])
+                    'z' => -2.0 * e[0].1.atan2(e[0].0),
+                    _ => 0.0,
+                }
+            })
+            .unwrap_or(0.0)
+    }
 }
 
 impl fmt::Display for Circuit {
@@ -1678,5 +1805,60 @@ mod tests {
         let h = Operator::hadamard();
         let (bit, _) = minus.measure_in_basis(0, &h, 0.5).unwrap();
         assert_eq!(bit, 1);
+    }
+
+    #[test]
+    fn test_qasm_bell_circuit() {
+        let mut c = Circuit::new(2);
+        c.hadamard(0).unwrap();
+        c.cnot(0, 1).unwrap();
+        c.measure(0).unwrap();
+        c.measure(1).unwrap();
+        let qasm = c.to_qasm();
+        assert!(qasm.contains("OPENQASM 2.0;"));
+        assert!(qasm.contains("include \"qelib1.inc\";"));
+        assert!(qasm.contains("qreg q[2];"));
+        assert!(qasm.contains("creg c[2];"));
+        assert!(qasm.contains("h q[0];"));
+        assert!(qasm.contains("cx q[0], q[1];"));
+        assert!(qasm.contains("measure q[0] -> c[0];"));
+        assert!(qasm.contains("measure q[1] -> c[1];"));
+    }
+
+    #[test]
+    fn test_qasm_rotation_gates() {
+        let mut c = Circuit::new(1);
+        c.rx(0, std::f64::consts::PI).unwrap();
+        c.ry(0, std::f64::consts::FRAC_PI_2).unwrap();
+        let qasm = c.to_qasm();
+        assert!(qasm.contains("rx("));
+        assert!(qasm.contains("ry("));
+    }
+
+    #[test]
+    fn test_qasm_toffoli() {
+        let mut c = Circuit::new(3);
+        c.toffoli(0, 1, 2).unwrap();
+        let qasm = c.to_qasm();
+        assert!(qasm.contains("ccx q[0], q[1], q[2];"));
+    }
+
+    #[test]
+    fn test_qasm_no_measurements() {
+        let mut c = Circuit::new(1);
+        c.hadamard(0).unwrap();
+        let qasm = c.to_qasm();
+        assert!(!qasm.contains("creg"));
+        assert!(!qasm.contains("measure"));
+    }
+
+    #[test]
+    fn test_qasm_fused_gate_as_comment() {
+        let mut c = Circuit::new(1);
+        c.hadamard(0).unwrap();
+        c.pauli_z(0).unwrap();
+        let opt = c.optimize();
+        let qasm = opt.to_qasm();
+        assert!(qasm.contains("// custom:"));
     }
 }

@@ -4,6 +4,38 @@ All notable changes to kana will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] — 2026-03-31
+
+### Added
+
+- **circuit**: OpenQASM 2.0 export via `Circuit::to_qasm()` — industry standard interchange format
+- **safe**: `QuantumBuilder` with compile-time no-cloning enforcement via move-only `Qubit` type
+- **dynamics**: `Hamiltonian`, Schrodinger evolution, Lindblad master equation (RK4), `expectation_value`
+- **entanglement**: State fidelity, trace distance, partial transpose, negativity, log-negativity, mutual information, entanglement of formation
+- **entanglement**: Choi matrix, process fidelity, average gate fidelity
+- **entanglement**: DensityMatrix validation (Hermitian, PSD, trace-1), Kraus completeness validation
+- **operator**: ZYZ Euler decomposition, KAK entangling estimation, SparseOperator
+- **bridge**: Hisab interop (Complex/ComplexMatrix conversions, eigenvalues, kronecker, matrix_exp, commutator, anticommutator)
+- **parallel**: Rayon-parallelized gate application and sampling (feature-gated)
+- **circuit**: Direct statevector simulation (10-58x speedup), gate fusion, inverse cancellation, periodic renormalization
+- **state**: try_zero (OOM handling), most_probable, support_size, renormalize, measure_in_basis, MAX_QUBITS=28
+- Prelude module (`kana::prelude`)
+- Send+Sync compile-time trait assertions on all public types
+- 5 examples (basic, safe builder, noise, algorithms, time evolution)
+- Full docs: architecture overview, 3 ADRs, threat model, dependency watch, testing guide, integration guide
+- KanaError now derives Clone
+- Serialize/Deserialize on NoiseChannel, Hamiltonian
+- PGO build script in Makefile
+
+### Changed
+
+- Eigenvalue algorithm uses 2n×2n real symmetric embedding (correct for complex Hermitian)
+- Lindblad integrator upgraded from Euler to RK4
+- `operator::apply()` uses direct slice access (no per-element bounds checking)
+- `ai::register_agent()` sends api_key as Bearer token, checks HTTP status
+- Feature gates: circuit implies state+operator, entanglement implies state, operator implies state
+- hisab optional (feature-gated), tokio features trimmed
+
 ## [1.0.0] — 2026-03-30
 
 ### Added

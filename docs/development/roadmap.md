@@ -64,6 +64,33 @@
 - [x] Large state vector support (MAX_QUBITS=28, try_zero with OOM handling, most_probable, support_size)
 - [x] Profile-guided optimization (`#[inline]` on hot paths, PGO build script in Makefile, branchless attempted but branch predictor wins at small qubit counts)
 
+## V1.1 — Industry Standard ✓
+
+- [x] OpenQASM 2.0 export (`Circuit::to_qasm()`)
+- [x] Prelude module, Send+Sync assertions, full docs/ADRs/examples
+- [x] KanaError Clone, Serialize on NoiseChannel/Hamiltonian
+
+## V2.0 — Advanced Compilation & Simulation
+
+### In-scope (kana owns)
+
+- [ ] Mixed-state concurrence (Wootters formula)
+- [ ] Steady-state Lindblad solver
+- [ ] Monte Carlo wave function trajectories
+- [ ] POVM / generalized measurement
+- [ ] Multi-qubit MLE tomography
+- [ ] Full KAK decomposition with local unitaries
+- [ ] Commutation analysis in optimizer
+- [ ] SIMD-optimized amplitude pair iteration
+
+### Separate crates (kana-*)
+
+- [ ] `kana-compile` — DAG-based circuit IR, pass manager, routing, template matching
+- [ ] `kana-stab` — Stabilizer tableau simulator (Gottesman-Knill, QEC)
+- [ ] `kana-mps` — MPS/tensor network simulation backend
+- [ ] `kana-qasm` — Full OpenQASM 3.0 parser + importer (use `oq3_parser`)
+- [ ] `kana-autodiff` — Auto-differentiation for VQE/QAOA (via hisab autodiff bridge)
+
 ## Consumer Mapping
 
 | Consumer | Uses |
