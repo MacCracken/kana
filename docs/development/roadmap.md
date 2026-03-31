@@ -57,11 +57,9 @@
 
 ## Post-V1 — Performance & Scale
 
+- [x] Statevector simulation via index permutation (1/2/3-qubit direct application)
 - [ ] Sparse matrix representation for large qubit systems
-- [ ] Direct permutation matrices for SWAP routing (eliminate full matrix multiply)
 - [ ] Gate fusion / circuit optimization pass before execution
-- [ ] Lazy gate expansion (avoid materializing full 2^n × 2^n matrices)
-- [ ] Statevector simulation via index permutation (avoid tensor product expansion)
 - [ ] Parallel operator application (rayon)
 - [ ] Memory-mapped state vectors for 16+ qubit systems
 - [ ] Profile-guided optimization of hot paths (apply, tensor_product, expand_gate)

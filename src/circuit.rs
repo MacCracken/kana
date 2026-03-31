@@ -550,8 +550,16 @@ impl Circuit {
                 2 if op.dim() == 4 => {
                     Self::apply_two_qubit_direct(&mut state, op, gate.targets[0], gate.targets[1]);
                 }
+                3 if op.dim() == 8 => {
+                    Self::apply_three_qubit_direct(
+                        &mut state,
+                        op,
+                        gate.targets[0],
+                        gate.targets[1],
+                        gate.targets[2],
+                    );
+                }
                 _ => {
-                    // Fallback: full matrix expansion for 3-qubit gates
                     let full_op = self.expand_gate(op, &gate.targets)?;
                     state = full_op.apply(&state)?;
                 }
@@ -628,6 +636,65 @@ impl Circuit {
         }
     }
 
+    /// Apply an 8×8 gate directly to state amplitudes on three target qubits.
+    ///
+    /// For each group of 8 amplitudes where the three target qubits take all
+    /// combinations (000..111), apply the 8×8 matrix. O(2^n) per gate.
+    fn apply_three_qubit_direct(
+        state: &mut StateVector,
+        gate: &Operator,
+        q0: usize,
+        q1: usize,
+        q2: usize,
+    ) {
+        let n = state.num_qubits();
+        let elems = gate.elements();
+        let bit0 = 1 << (n - 1 - q0);
+        let bit1 = 1 << (n - 1 - q1);
+        let bit2 = 1 << (n - 1 - q2);
+        let mask = bit0 | bit1 | bit2;
+        let amps = state.amplitudes_mut();
+
+        for i in 0..amps.len() {
+            // Only process when all three target bits are 0
+            if i & mask != 0 {
+                continue;
+            }
+            // Build the 8 indices: iterate all combinations of the 3 target bits
+            let indices = [
+                i,
+                i | bit2,
+                i | bit1,
+                i | bit1 | bit2,
+                i | bit0,
+                i | bit0 | bit2,
+                i | bit0 | bit1,
+                i | bit0 | bit1 | bit2,
+            ];
+
+            let a: [(f64, f64); 8] = [
+                amps[indices[0]],
+                amps[indices[1]],
+                amps[indices[2]],
+                amps[indices[3]],
+                amps[indices[4]],
+                amps[indices[5]],
+                amps[indices[6]],
+                amps[indices[7]],
+            ];
+
+            for (out_idx, &target_i) in indices.iter().enumerate() {
+                let (mut re, mut im) = (0.0, 0.0);
+                for (in_idx, &(s_re, s_im)) in a.iter().enumerate() {
+                    let (m_re, m_im) = elems[out_idx * 8 + in_idx];
+                    re += m_re * s_re - m_im * s_im;
+                    im += m_re * s_im + m_im * s_re;
+                }
+                amps[target_i] = (re, im);
+            }
+        }
+    }
+
     /// Execute the circuit with measurement, using provided random values.
     ///
     /// Returns `(final_state, measurement_results)` where measurement_results
@@ -684,6 +751,15 @@ impl Circuit {
                             op,
                             gate.targets[0],
                             gate.targets[1],
+                        );
+                    }
+                    3 if op.dim() == 8 => {
+                        Self::apply_three_qubit_direct(
+                            &mut state,
+                            op,
+                            gate.targets[0],
+                            gate.targets[1],
+                            gate.targets[2],
                         );
                     }
                     _ => {
