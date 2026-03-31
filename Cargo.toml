@@ -54,3 +54,19 @@ required-features = ["state", "operator", "entanglement", "circuit"]
 [[example]]
 name = "basic_quantum"
 required-features = ["state", "operator", "entanglement", "circuit"]
+
+[[example]]
+name = "safe_builder"
+required-features = ["state", "operator", "circuit"]
+
+[[example]]
+name = "noise_simulation"
+required-features = ["state", "operator", "entanglement"]
+
+[[example]]
+name = "algorithms"
+required-features = ["state", "operator", "entanglement", "circuit"]
+
+[[example]]
+name = "time_evolution"
+required-features = ["state", "operator", "entanglement"]
