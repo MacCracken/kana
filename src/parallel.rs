@@ -243,9 +243,18 @@ pub fn apply_three_qubit_par(
 }
 
 /// Parallel Born-rule sampling: generate multiple measurement outcomes.
-pub fn sample_par(state: &StateVector, random_values: &[f64]) -> Vec<usize> {
+///
+/// Each `r` value must be in \[0, 1). Returns an error for invalid values.
+pub fn sample_par(state: &StateVector, random_values: &[f64]) -> crate::error::Result<Vec<usize>> {
+    for &r in random_values {
+        if !(0.0..1.0).contains(&r) {
+            return Err(crate::error::KanaError::InvalidParameter {
+                reason: format!("random value {r} not in [0, 1)"),
+            });
+        }
+    }
     let probs = state.probabilities();
-    random_values
+    Ok(random_values
         .par_iter()
         .map(|&r| {
             let mut cumulative = 0.0;
@@ -259,7 +268,7 @@ pub fn sample_par(state: &StateVector, random_values: &[f64]) -> Vec<usize> {
             }
             outcome
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -308,7 +317,7 @@ mod tests {
     fn test_par_sample() {
         let state = StateVector::plus();
         let rs: Vec<f64> = (0..10).map(|i| (i as f64) / 10.0).collect();
-        let par_results = sample_par(&state, &rs);
+        let par_results = sample_par(&state, &rs).unwrap();
         let seq_results = state.sample(&rs).unwrap();
         assert_eq!(par_results, seq_results);
     }

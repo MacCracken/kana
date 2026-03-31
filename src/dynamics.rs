@@ -152,13 +152,41 @@ impl Hamiltonian {
 
         let mut current = rho.elements().to_vec();
         let step_dt = dt / steps as f64;
+        let nn = dim * dim;
 
         for _ in 0..steps {
-            let deriv = self.lindblad_rhs(&current, dim);
-            // Euler step: ρ(t+dt) = ρ(t) + dt · dρ/dt
-            for i in 0..dim * dim {
-                current[i].0 += step_dt * deriv[i].0;
-                current[i].1 += step_dt * deriv[i].1;
+            // RK4 integration for better stability
+            let k1 = self.lindblad_rhs(&current, dim);
+
+            let mut tmp = vec![(0.0, 0.0); nn];
+            for i in 0..nn {
+                tmp[i] = (
+                    current[i].0 + 0.5 * step_dt * k1[i].0,
+                    current[i].1 + 0.5 * step_dt * k1[i].1,
+                );
+            }
+            let k2 = self.lindblad_rhs(&tmp, dim);
+
+            for i in 0..nn {
+                tmp[i] = (
+                    current[i].0 + 0.5 * step_dt * k2[i].0,
+                    current[i].1 + 0.5 * step_dt * k2[i].1,
+                );
+            }
+            let k3 = self.lindblad_rhs(&tmp, dim);
+
+            for i in 0..nn {
+                tmp[i] = (
+                    current[i].0 + step_dt * k3[i].0,
+                    current[i].1 + step_dt * k3[i].1,
+                );
+            }
+            let k4 = self.lindblad_rhs(&tmp, dim);
+
+            // ρ(t+dt) = ρ(t) + (dt/6)(k1 + 2k2 + 2k3 + k4)
+            for i in 0..nn {
+                current[i].0 += step_dt / 6.0 * (k1[i].0 + 2.0 * k2[i].0 + 2.0 * k3[i].0 + k4[i].0);
+                current[i].1 += step_dt / 6.0 * (k1[i].1 + 2.0 * k2[i].1 + 2.0 * k3[i].1 + k4[i].1);
             }
         }
 

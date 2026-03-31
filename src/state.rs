@@ -413,12 +413,38 @@ impl StateVector {
         }
         // Apply basis rotation, measure in computational basis, rotate back
         let mut rotated = self.clone();
-        crate::circuit::Circuit::apply_single_qubit_direct(&mut rotated, basis_gate, qubit);
+        Self::apply_1q_gate(&mut rotated, basis_gate, qubit);
         let (bit, mut collapsed) = rotated.measure_qubit(qubit, r)?;
-        // Rotate back: apply basis_gate†
         let basis_inv = basis_gate.dagger();
-        crate::circuit::Circuit::apply_single_qubit_direct(&mut collapsed, &basis_inv, qubit);
+        Self::apply_1q_gate(&mut collapsed, &basis_inv, qubit);
         Ok((bit, collapsed))
+    }
+
+    /// Apply a 2×2 gate to a single qubit in-place (used by measure_in_basis).
+    fn apply_1q_gate(state: &mut Self, gate: &crate::operator::Operator, target: usize) {
+        let n = state.num_qubits;
+        let elems = gate.elements();
+        let (u00_re, u00_im) = elems[0];
+        let (u01_re, u01_im) = elems[1];
+        let (u10_re, u10_im) = elems[2];
+        let (u11_re, u11_im) = elems[3];
+        let bit = 1 << (n - 1 - target);
+        for i in 0..state.amplitudes.len() {
+            if i & bit != 0 {
+                continue;
+            }
+            let j = i | bit;
+            let (a_re, a_im) = state.amplitudes[i];
+            let (b_re, b_im) = state.amplitudes[j];
+            state.amplitudes[i] = (
+                u00_re * a_re - u00_im * a_im + u01_re * b_re - u01_im * b_im,
+                u00_re * a_im + u00_im * a_re + u01_re * b_im + u01_im * b_re,
+            );
+            state.amplitudes[j] = (
+                u10_re * a_re - u10_im * a_im + u11_re * b_re - u11_im * b_im,
+                u10_re * a_im + u10_im * a_re + u11_re * b_im + u11_im * b_re,
+            );
+        }
     }
 
     /// Bloch sphere representation for a single-qubit state.

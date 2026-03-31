@@ -151,26 +151,42 @@ impl DensityMatrix {
 
     /// Compute real eigenvalues of this Hermitian density matrix.
     ///
-    /// Uses the Jacobi eigenvalue algorithm on the real-symmetric part.
-    /// For density matrices from physical quantum states, the real part
-    /// captures the full eigenvalue spectrum.
+    /// Uses the Jacobi eigenvalue algorithm on the 2n×2n real symmetric
+    /// embedding of the Hermitian matrix, which correctly handles complex
+    /// off-diagonal elements.
     #[must_use]
     pub fn hermitian_eigenvalues(&self) -> Vec<f64> {
         let n = self.dim;
 
-        // Extract real-symmetric matrix
-        let mut a: Vec<f64> = (0..n * n).map(|idx| self.elements[idx].0).collect();
+        // Build the 2n×2n real symmetric embedding:
+        // M = [[Re(H), -Im(H)], [Im(H), Re(H)]]
+        // Eigenvalues of M are eigenvalues of H, each appearing twice.
+        let n2 = 2 * n;
+        let mut a: Vec<f64> = vec![0.0; n2 * n2];
+        for i in 0..n {
+            for j in 0..n {
+                let (re, im) = self.elements[i * n + j];
+                // Top-left: Re(H)
+                a[i * n2 + j] = re;
+                // Top-right: -Im(H)
+                a[i * n2 + (n + j)] = -im;
+                // Bottom-left: Im(H)
+                a[(n + i) * n2 + j] = im;
+                // Bottom-right: Re(H)
+                a[(n + i) * n2 + (n + j)] = re;
+            }
+        }
+        let n_jacobi = n2;
 
-        // Jacobi eigenvalue algorithm: iteratively zero off-diagonal elements
-        // using Givens rotations. Converges for all real symmetric matrices.
-        for _ in 0..n * n * 100 {
+        // Jacobi eigenvalue algorithm on the 2n×2n real symmetric matrix.
+        for _ in 0..n_jacobi * n_jacobi * 100 {
             // Find largest off-diagonal element
             let mut max_val = 0.0_f64;
             let mut p = 0;
             let mut q = 1;
-            for i in 0..n {
-                for j in (i + 1)..n {
-                    let v = a[i * n + j].abs();
+            for i in 0..n_jacobi {
+                for j in (i + 1)..n_jacobi {
+                    let v = a[i * n_jacobi + j].abs();
                     if v > max_val {
                         max_val = v;
                         p = i;
@@ -184,9 +200,9 @@ impl DensityMatrix {
             }
 
             // Compute rotation angle
-            let app = a[p * n + p];
-            let aqq = a[q * n + q];
-            let apq = a[p * n + q];
+            let app = a[p * n_jacobi + p];
+            let aqq = a[q * n_jacobi + q];
+            let apq = a[p * n_jacobi + q];
 
             let (cos, sin) = if (app - aqq).abs() < NORM_TOLERANCE {
                 let s = std::f64::consts::FRAC_1_SQRT_2;
@@ -203,26 +219,29 @@ impl DensityMatrix {
             };
 
             // Apply Jacobi rotation in-place: A' = J^T A J
-            // Update rows/cols p and q
-            for i in 0..n {
+            for i in 0..n_jacobi {
                 if i != p && i != q {
-                    let aip = a[i * n + p];
-                    let aiq = a[i * n + q];
-                    a[i * n + p] = cos * aip - sin * aiq;
-                    a[p * n + i] = a[i * n + p];
-                    a[i * n + q] = sin * aip + cos * aiq;
-                    a[q * n + i] = a[i * n + q];
+                    let aip = a[i * n_jacobi + p];
+                    let aiq = a[i * n_jacobi + q];
+                    a[i * n_jacobi + p] = cos * aip - sin * aiq;
+                    a[p * n_jacobi + i] = a[i * n_jacobi + p];
+                    a[i * n_jacobi + q] = sin * aip + cos * aiq;
+                    a[q * n_jacobi + i] = a[i * n_jacobi + q];
                 }
             }
 
-            a[p * n + p] = cos * cos * app - 2.0 * sin * cos * apq + sin * sin * aqq;
-            a[q * n + q] = sin * sin * app + 2.0 * sin * cos * apq + cos * cos * aqq;
-            a[p * n + q] = 0.0;
-            a[q * n + p] = 0.0;
+            a[p * n_jacobi + p] = cos * cos * app - 2.0 * sin * cos * apq + sin * sin * aqq;
+            a[q * n_jacobi + q] = sin * sin * app + 2.0 * sin * cos * apq + cos * cos * aqq;
+            a[p * n_jacobi + q] = 0.0;
+            a[q * n_jacobi + p] = 0.0;
         }
 
-        // Diagonal elements are the eigenvalues
-        (0..n).map(|i| a[i * n + i]).collect()
+        // Extract eigenvalues from 2n×2n diagonal. Each eigenvalue appears twice.
+        // Collect all diagonal values, sort, deduplicate by pairing.
+        let mut all_evals: Vec<f64> = (0..n_jacobi).map(|i| a[i * n_jacobi + i]).collect();
+        all_evals.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+        // Take every other eigenvalue (each appears twice in the 2n×2n embedding)
+        all_evals.iter().step_by(2).copied().collect()
     }
 
     /// Partial trace over subsystem B for a bipartite system A⊗B.
@@ -400,9 +419,10 @@ pub fn estimate_pauli_expectations(
 
 /// Quantum state fidelity F(ρ, σ) for two density matrices.
 ///
-/// For pure states: F = |⟨ψ|φ⟩|². For mixed states, uses the simplified
-/// formula F = Tr(ρσ) + 2√(det(ρ)det(σ)) for 2×2 matrices,
-/// and the general F = (Tr√(√ρ σ √ρ))² via eigenvalue approximation for larger.
+/// Exact when at least one state is pure: F = Tr(ρσ).
+/// For mixed-mixed states: uses an eigenvalue-based upper bound approximation.
+/// For exact Uhlmann fidelity on mixed states, use the hisab bridge
+/// (`eigenvalues_hermitian` + matrix square root).
 ///
 /// Returns a value in \[0, 1\] where 1 means identical states.
 pub fn state_fidelity(rho: &DensityMatrix, sigma: &DensityMatrix) -> Result<f64> {

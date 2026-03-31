@@ -506,19 +506,20 @@ impl Operator {
         u
     }
 
-    /// KAK decomposition of a two-qubit unitary.
+    /// Estimate the entangling structure of a two-qubit unitary.
     ///
-    /// Any U ∈ SU(4) can be written as:
-    /// U = (A₁⊗A₂) · exp(i(x·XX + y·YY + z·ZZ)) · (A₃⊗A₄)
+    /// Returns an approximate CNOT count and estimated interaction strength.
+    /// Uses tensor-product detection and trace analysis — does NOT compute
+    /// the full KAK local unitaries (A₁, A₂, A₃, A₄).
     ///
-    /// Returns `(before_local: [A3, A4], interaction: [x, y, z], after_local: [A1, A2])`.
-    /// The interaction coefficients are in \[0, π/4\] with x ≥ y ≥ z ≥ 0.
+    /// For full KAK decomposition with local unitaries, use the hisab bridge
+    /// with `eigen_hermitian` on the magic-basis-transformed matrix.
     ///
-    /// For circuits: the interaction can be implemented with at most 3 CNOTs.
-    /// - 0 CNOTs if x = y = z = 0 (product of locals)
-    /// - 1 CNOT if only x ≠ 0 and y = z = 0
-    /// - 2 CNOTs if z = 0
-    /// - 3 CNOTs in general
+    /// CNOT count interpretation:
+    /// - 0: product of local unitaries (A⊗B)
+    /// - 1: CNOT-equivalent (e.g., CNOT, CZ)
+    /// - 2: partially entangling
+    /// - 3: general two-qubit gate
     pub fn kak_decomposition(&self) -> Result<KakDecomposition> {
         if self.dim != 4 {
             return Err(KanaError::DimensionMismatch {
