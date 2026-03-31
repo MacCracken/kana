@@ -419,6 +419,188 @@ impl Operator {
             dim: new_dim,
         }
     }
+
+    /// Convert to sparse representation, dropping entries below tolerance.
+    #[must_use]
+    pub fn to_sparse(&self) -> SparseOperator {
+        SparseOperator::from_dense(self)
+    }
+
+    /// Sparsity ratio: fraction of zero elements.
+    #[inline]
+    #[must_use]
+    pub fn sparsity(&self) -> f64 {
+        let total = self.elements.len();
+        let zeros = self
+            .elements
+            .iter()
+            .filter(|&&(re, im)| re == 0.0 && im == 0.0)
+            .count();
+        zeros as f64 / total as f64
+    }
+}
+
+/// Sparse quantum operator in COO (coordinate) format.
+///
+/// Stores only non-zero (row, col, value) entries. Efficient for
+/// gates with many zeros (CNOT, Toffoli, identity-like operators).
+#[derive(Debug, Clone)]
+pub struct SparseOperator {
+    /// Non-zero entries as (row, col, re, im).
+    entries: Vec<(usize, usize, f64, f64)>,
+    /// Dimension of the operator (n×n).
+    dim: usize,
+}
+
+impl SparseOperator {
+    /// Create a sparse operator from a list of non-zero entries.
+    pub fn new(dim: usize, entries: Vec<(usize, usize, f64, f64)>) -> Result<Self> {
+        if dim == 0 {
+            return Err(KanaError::InvalidParameter {
+                reason: "operator dimension must be > 0".into(),
+            });
+        }
+        for &(row, col, _, _) in &entries {
+            if row >= dim || col >= dim {
+                return Err(KanaError::InvalidParameter {
+                    reason: format!("entry ({row}, {col}) out of bounds for dim {dim}"),
+                });
+            }
+        }
+        Ok(Self { entries, dim })
+    }
+
+    /// Convert from a dense operator, dropping entries with magnitude below tolerance.
+    #[must_use]
+    pub fn from_dense(op: &Operator) -> Self {
+        let dim = op.dim();
+        let tol = crate::state::NORM_TOLERANCE;
+        let entries: Vec<(usize, usize, f64, f64)> = op
+            .elements()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &(re, im))| {
+                if re.abs() > tol || im.abs() > tol {
+                    let row = idx / dim;
+                    let col = idx % dim;
+                    Some((row, col, re, im))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Self { entries, dim }
+    }
+
+    /// Convert back to a dense operator.
+    #[must_use]
+    pub fn to_dense(&self) -> Operator {
+        let mut elements = vec![(0.0, 0.0); self.dim * self.dim];
+        for &(row, col, re, im) in &self.entries {
+            elements[row * self.dim + col] = (re, im);
+        }
+        Operator {
+            elements,
+            dim: self.dim,
+        }
+    }
+
+    /// Dimension of this operator.
+    #[inline]
+    #[must_use]
+    pub fn dim(&self) -> usize {
+        self.dim
+    }
+
+    /// Number of non-zero entries.
+    #[inline]
+    #[must_use]
+    pub fn nnz(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Apply this sparse operator to a state vector: |ψ'⟩ = U|ψ⟩.
+    ///
+    /// Only multiplies by non-zero entries, skipping all zeros.
+    /// For a gate with k non-zero entries out of n², this is O(k) per
+    /// output element instead of O(n).
+    pub fn apply(&self, state: &StateVector) -> Result<StateVector> {
+        if self.dim != state.dimension() {
+            return Err(KanaError::DimensionMismatch {
+                expected: self.dim,
+                got: state.dimension(),
+            });
+        }
+        let amps = state.amplitudes();
+        let mut result = vec![(0.0, 0.0); self.dim];
+        for &(row, col, m_re, m_im) in &self.entries {
+            let (s_re, s_im) = amps[col];
+            result[row].0 += m_re * s_re - m_im * s_im;
+            result[row].1 += m_re * s_im + m_im * s_re;
+        }
+        StateVector::new(result).map_err(|e| match e {
+            KanaError::NotNormalized { norm } => KanaError::NotUnitary {
+                deviation: (norm - 1.0).abs(),
+            },
+            other => other,
+        })
+    }
+
+    /// Sparse matrix-matrix multiply.
+    pub fn multiply(&self, other: &Self) -> Result<Self> {
+        if self.dim != other.dim {
+            return Err(KanaError::DimensionMismatch {
+                expected: self.dim,
+                got: other.dim,
+            });
+        }
+        let dim = self.dim;
+        // Build result: for each (i,k) in self and (k,j) in other, add to (i,j)
+        let mut dense = vec![(0.0, 0.0); dim * dim];
+        for &(i, k, a_re, a_im) in &self.entries {
+            for &(k2, j, b_re, b_im) in &other.entries {
+                if k == k2 {
+                    let idx = i * dim + j;
+                    dense[idx].0 += a_re * b_re - a_im * b_im;
+                    dense[idx].1 += a_re * b_im + a_im * b_re;
+                }
+            }
+        }
+        // Convert back to sparse
+        let tol = crate::state::NORM_TOLERANCE;
+        let entries: Vec<(usize, usize, f64, f64)> = dense
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &(re, im))| {
+                if re.abs() > tol || im.abs() > tol {
+                    Some((idx / dim, idx % dim, re, im))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(Self { entries, dim })
+    }
+
+    /// Sparse Kronecker (tensor) product.
+    #[must_use]
+    pub fn tensor_product(&self, other: &Self) -> Self {
+        let new_dim = self.dim * other.dim;
+        let mut entries = Vec::with_capacity(self.entries.len() * other.entries.len());
+        for &(i, j, a_re, a_im) in &self.entries {
+            for &(k, l, b_re, b_im) in &other.entries {
+                let row = i * other.dim + k;
+                let col = j * other.dim + l;
+                let re = a_re * b_re - a_im * b_im;
+                let im = a_re * b_im + a_im * b_re;
+                entries.push((row, col, re, im));
+            }
+        }
+        Self {
+            entries,
+            dim: new_dim,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -666,5 +848,68 @@ mod tests {
     fn test_controlled_u_dimension_check() {
         let id4 = Operator::identity(4);
         assert!(Operator::controlled(&id4).is_err());
+    }
+
+    #[test]
+    fn test_sparse_roundtrip() {
+        let h = Operator::hadamard();
+        let sparse = h.to_sparse();
+        let back = sparse.to_dense();
+        for i in 0..2 {
+            for j in 0..2 {
+                let (a_re, a_im) = h.element(i, j).unwrap();
+                let (b_re, b_im) = back.element(i, j).unwrap();
+                assert!((a_re - b_re).abs() < 1e-10);
+                assert!((a_im - b_im).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn test_sparse_nnz() {
+        // Identity 4x4 has 4 non-zero entries
+        let id = Operator::identity(4);
+        let sparse = id.to_sparse();
+        assert_eq!(sparse.nnz(), 4);
+        assert_eq!(sparse.dim(), 4);
+
+        // CNOT has 4 non-zero entries
+        let cnot = Operator::cnot();
+        assert_eq!(cnot.to_sparse().nnz(), 4);
+    }
+
+    #[test]
+    fn test_sparse_apply_matches_dense() {
+        let h = Operator::hadamard();
+        let sparse = h.to_sparse();
+        let state = StateVector::zero(1);
+
+        let dense_result = h.apply(&state).unwrap();
+        let sparse_result = sparse.apply(&state).unwrap();
+
+        for i in 0..2 {
+            let (a_re, a_im) = dense_result.amplitude(i).unwrap();
+            let (b_re, b_im) = sparse_result.amplitude(i).unwrap();
+            assert!((a_re - b_re).abs() < 1e-10);
+            assert!((a_im - b_im).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_sparse_tensor_product() {
+        let x = Operator::pauli_x().to_sparse();
+        let id = Operator::identity(2).to_sparse();
+        let xi = x.tensor_product(&id);
+        assert_eq!(xi.dim(), 4);
+        assert_eq!(xi.nnz(), 4); // X⊗I has 4 non-zero entries
+    }
+
+    #[test]
+    fn test_sparsity() {
+        let id = Operator::identity(4);
+        assert!((id.sparsity() - 0.75).abs() < 1e-10); // 12/16 zeros
+
+        let tof = Operator::toffoli();
+        assert!((tof.sparsity() - 0.875).abs() < 1e-10); // 56/64 zeros
     }
 }

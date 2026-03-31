@@ -583,36 +583,70 @@ impl Circuit {
                     gate.name
                 ),
             })?;
-            match gate.targets.len() {
-                1 if op.dim() == 2 => {
-                    Self::apply_single_qubit_direct(&mut state, op, gate.targets[0]);
-                }
-                2 if op.dim() == 4 => {
-                    Self::apply_two_qubit_direct(&mut state, op, gate.targets[0], gate.targets[1]);
-                }
-                3 if op.dim() == 8 => {
-                    Self::apply_three_qubit_direct(
-                        &mut state,
-                        op,
-                        gate.targets[0],
-                        gate.targets[1],
-                        gate.targets[2],
-                    );
-                }
-                _ => {
-                    let full_op = self.expand_gate(op, &gate.targets)?;
-                    state = full_op.apply(&state)?;
-                }
-            }
+            Self::apply_gate_direct(&mut state, op, &gate.targets, self)?;
         }
         Ok(state)
+    }
+
+    /// Dispatch a gate to the appropriate direct-application method.
+    ///
+    /// When the `parallel` feature is enabled and the statevector is large,
+    /// uses rayon-parallelized versions automatically.
+    fn apply_gate_direct(
+        state: &mut StateVector,
+        op: &Operator,
+        targets: &[usize],
+        circuit: &Self,
+    ) -> Result<()> {
+        #[cfg(feature = "parallel")]
+        let use_par = state.dimension() >= 1024;
+        #[cfg(not(feature = "parallel"))]
+        let use_par = false;
+
+        match targets.len() {
+            1 if op.dim() == 2 => {
+                #[cfg(feature = "parallel")]
+                if use_par {
+                    crate::parallel::apply_single_qubit_par(state, op, targets[0]);
+                    return Ok(());
+                }
+                Self::apply_single_qubit_direct(state, op, targets[0]);
+            }
+            2 if op.dim() == 4 => {
+                #[cfg(feature = "parallel")]
+                if use_par {
+                    crate::parallel::apply_two_qubit_par(state, op, targets[0], targets[1]);
+                    return Ok(());
+                }
+                Self::apply_two_qubit_direct(state, op, targets[0], targets[1]);
+            }
+            3 if op.dim() == 8 => {
+                #[cfg(feature = "parallel")]
+                if use_par {
+                    crate::parallel::apply_three_qubit_par(
+                        state, op, targets[0], targets[1], targets[2],
+                    );
+                    return Ok(());
+                }
+                Self::apply_three_qubit_direct(state, op, targets[0], targets[1], targets[2]);
+            }
+            _ => {
+                let full_op = circuit.expand_gate(op, targets)?;
+                *state = full_op.apply(state)?;
+            }
+        }
+        Ok(())
     }
 
     /// Apply a 2×2 gate directly to state amplitudes on target qubit.
     ///
     /// For each pair of amplitudes where the target qubit differs (0 vs 1),
     /// apply the 2×2 matrix. O(2^n) instead of O(4^n).
-    fn apply_single_qubit_direct(state: &mut StateVector, gate: &Operator, target: usize) {
+    pub(crate) fn apply_single_qubit_direct(
+        state: &mut StateVector,
+        gate: &Operator,
+        target: usize,
+    ) {
         let n = state.num_qubits();
         let elems = gate.elements();
         let (u00_re, u00_im) = elems[0];
@@ -646,7 +680,12 @@ impl Circuit {
     ///
     /// For each group of 4 amplitudes where the two target qubits take all
     /// combinations (00, 01, 10, 11), apply the 4×4 matrix. O(2^n) per gate.
-    fn apply_two_qubit_direct(state: &mut StateVector, gate: &Operator, q0: usize, q1: usize) {
+    pub(crate) fn apply_two_qubit_direct(
+        state: &mut StateVector,
+        gate: &Operator,
+        q0: usize,
+        q1: usize,
+    ) {
         let n = state.num_qubits();
         let elems = gate.elements();
         let bit0 = 1 << (n - 1 - q0);
@@ -781,32 +820,7 @@ impl Circuit {
                         ),
                     }
                 })?;
-                match gate.targets.len() {
-                    1 if op.dim() == 2 => {
-                        Self::apply_single_qubit_direct(&mut state, op, gate.targets[0]);
-                    }
-                    2 if op.dim() == 4 => {
-                        Self::apply_two_qubit_direct(
-                            &mut state,
-                            op,
-                            gate.targets[0],
-                            gate.targets[1],
-                        );
-                    }
-                    3 if op.dim() == 8 => {
-                        Self::apply_three_qubit_direct(
-                            &mut state,
-                            op,
-                            gate.targets[0],
-                            gate.targets[1],
-                            gate.targets[2],
-                        );
-                    }
-                    _ => {
-                        let full_op = self.expand_gate(op, &gate.targets)?;
-                        state = full_op.apply(&state)?;
-                    }
-                }
+                Self::apply_gate_direct(&mut state, op, &gate.targets, self)?;
             }
         }
         Ok((state, measurements))

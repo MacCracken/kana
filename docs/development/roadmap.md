@@ -58,9 +58,9 @@
 ## Post-V1 — Performance & Scale
 
 - [x] Statevector simulation via index permutation (1/2/3-qubit direct application)
-- [ ] Sparse matrix representation for large qubit systems
+- [x] Parallel operator application (rayon, feature-gated, auto-threshold at 10+ qubits)
+- [x] Sparse operator representation (SparseOperator with COO format, apply, multiply, tensor_product)
 - [x] Gate fusion / circuit optimization pass (`optimize()` fuses adjacent 1q gates)
-- [ ] Parallel operator application (rayon)
 - [ ] Memory-mapped state vectors for 16+ qubit systems
 - [ ] Profile-guided optimization of hot paths (apply, tensor_product, expand_gate)
 

@@ -38,13 +38,16 @@ pub mod ai;
 #[cfg(feature = "hisab-bridge")]
 pub mod bridge;
 
+#[cfg(all(feature = "parallel", feature = "state", feature = "operator"))]
+pub mod parallel;
+
 pub use error::{KanaError, Result};
 
 #[cfg(feature = "state")]
 pub use state::{NORM_TOLERANCE, StateVector};
 
 #[cfg(feature = "operator")]
-pub use operator::Operator;
+pub use operator::{Operator, SparseOperator};
 
 #[cfg(feature = "entanglement")]
 pub use entanglement::{DensityMatrix, NoiseChannel};
