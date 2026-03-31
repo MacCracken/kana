@@ -516,17 +516,32 @@ impl Circuit {
         Ok(())
     }
 
-    /// Return an optimized copy of this circuit with adjacent single-qubit
-    /// gates on the same target fused into single operators.
+    /// Return an optimized copy of this circuit.
+    ///
+    /// Optimizations applied:
+    /// - Adjacent single-qubit gates on the same target are fused (matrix multiply)
+    /// - Inverse gate pairs are cancelled (HH=I, XX=I, CNOT·CNOT=I, etc.)
+    /// - Identity-like fused gates are removed
     #[must_use]
     pub fn optimize(&self) -> Self {
         let mut optimized_gates: Vec<Gate> = Vec::new();
 
         for gate in &self.gates {
-            // Only fuse single-qubit gates with operators
+            // Check for inverse cancellation: same gate type + same targets → cancel
+            if gate.name != "M" && !optimized_gates.is_empty() {
+                let prev = optimized_gates.last().unwrap();
+                if prev.targets == gate.targets
+                    && prev.name == gate.name
+                    && Self::is_self_inverse(&gate.name)
+                {
+                    optimized_gates.pop();
+                    continue;
+                }
+            }
+
+            // Fuse adjacent single-qubit gates on the same target
             if gate.targets.len() == 1 && gate.operator.is_some() && gate.name != "M" {
                 let target = gate.targets[0];
-                // Check if the last optimized gate is also a single-qubit gate on same target
                 let can_fuse = optimized_gates.last().is_some_and(|prev| {
                     prev.targets.len() == 1
                         && prev.targets[0] == target
@@ -541,8 +556,13 @@ impl Circuit {
                         .zip(gate.operator.as_ref())
                         .and_then(|(prev_op, gate_op)| gate_op.multiply(prev_op).ok());
                     if let Some(fused) = fused {
-                        prev.operator = Some(fused);
-                        prev.name = format!("{}+{}", prev.name, gate.name);
+                        // Check if the fused gate is approximately identity → remove
+                        if Self::is_near_identity(&fused) {
+                            optimized_gates.pop();
+                        } else {
+                            prev.operator = Some(fused);
+                            prev.name = format!("{}+{}", prev.name, gate.name);
+                        }
                         continue;
                     }
                 }
@@ -554,6 +574,27 @@ impl Circuit {
             num_qubits: self.num_qubits,
             gates: optimized_gates,
         }
+    }
+
+    /// Check if a gate is its own inverse (involutory).
+    fn is_self_inverse(name: &str) -> bool {
+        matches!(name, "H" | "X" | "Y" | "Z" | "CNOT" | "CZ" | "SWAP")
+    }
+
+    /// Check if an operator is approximately the identity matrix.
+    fn is_near_identity(op: &Operator) -> bool {
+        let dim = op.dim();
+        let elems = op.elements();
+        for i in 0..dim {
+            for j in 0..dim {
+                let (re, im) = elems[i * dim + j];
+                let expected = if i == j { 1.0 } else { 0.0 };
+                if (re - expected).abs() > 1e-8 || im.abs() > 1e-8 {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Execute the circuit on the |0...0⟩ initial state.
@@ -573,6 +614,7 @@ impl Circuit {
                 got: state.dimension(),
             });
         }
+        let mut gate_count = 0u32;
         for gate in &self.gates {
             if gate.name == "M" {
                 continue;
@@ -584,6 +626,11 @@ impl Circuit {
                 ),
             })?;
             Self::apply_gate_direct(&mut state, op, &gate.targets, self)?;
+            gate_count += 1;
+            // Periodic renormalization to prevent floating-point drift
+            if gate_count.is_multiple_of(100) {
+                state.renormalize();
+            }
         }
         Ok(state)
     }
@@ -1581,5 +1628,55 @@ mod tests {
         let opt = c.optimize();
         // H, M, X — measurement breaks the chain, no fusion
         assert_eq!(opt.num_gates(), 3);
+    }
+
+    #[test]
+    fn test_optimize_cancels_inverse_pairs() {
+        // H·H = I, should be cancelled
+        let mut c = Circuit::new(1);
+        c.hadamard(0).unwrap();
+        c.hadamard(0).unwrap();
+        let opt = c.optimize();
+        assert_eq!(opt.num_gates(), 0);
+    }
+
+    #[test]
+    fn test_optimize_cancels_cnot_pair() {
+        let mut c = Circuit::new(2);
+        c.cnot(0, 1).unwrap();
+        c.cnot(0, 1).unwrap();
+        let opt = c.optimize();
+        assert_eq!(opt.num_gates(), 0);
+    }
+
+    #[test]
+    fn test_optimize_cancels_and_fuses_mixed() {
+        // H, X, X, Z → H, I, Z → H, Z → fused single gate
+        let mut c = Circuit::new(1);
+        c.hadamard(0).unwrap();
+        c.pauli_x(0).unwrap();
+        c.pauli_x(0).unwrap();
+        c.pauli_z(0).unwrap();
+        let opt = c.optimize();
+        // XX cancels → H, Z → fused to 1 gate
+        assert_eq!(opt.num_gates(), 1);
+    }
+
+    #[test]
+    fn test_measure_in_x_basis() {
+        // |+⟩ measured in X basis should always give 0
+        let plus = StateVector::plus();
+        let h = Operator::hadamard();
+        let (bit, _) = plus.measure_in_basis(0, &h, 0.5).unwrap();
+        assert_eq!(bit, 0);
+    }
+
+    #[test]
+    fn test_measure_in_x_basis_minus() {
+        // |−⟩ measured in X basis should always give 1
+        let minus = StateVector::minus();
+        let h = Operator::hadamard();
+        let (bit, _) = minus.measure_in_basis(0, &h, 0.5).unwrap();
+        assert_eq!(bit, 1);
     }
 }

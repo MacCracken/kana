@@ -170,6 +170,21 @@ impl StateVector {
             .sqrt()
     }
 
+    /// Renormalize the state vector to unit norm.
+    ///
+    /// Corrects floating-point drift after many gate applications.
+    /// Safe to call periodically during long circuit executions.
+    pub fn renormalize(&mut self) {
+        let n = self.norm();
+        if n > 0.0 && (n - 1.0).abs() > f64::EPSILON {
+            let inv_n = 1.0 / n;
+            for (re, im) in &mut self.amplitudes {
+                *re *= inv_n;
+                *im *= inv_n;
+            }
+        }
+    }
+
     /// Probability of measuring basis state |i⟩.
     #[inline]
     #[must_use]
@@ -377,6 +392,33 @@ impl StateVector {
                 outcome
             })
             .collect())
+    }
+
+    /// Measure a single qubit in an arbitrary basis defined by a 2×2 unitary.
+    ///
+    /// `basis_gate` rotates from the measurement basis to the computational basis.
+    /// For example: H for X-basis, S†H for Y-basis.
+    /// Returns `(bit_value, collapsed_state)`.
+    pub fn measure_in_basis(
+        &self,
+        qubit: usize,
+        basis_gate: &crate::operator::Operator,
+        r: f64,
+    ) -> Result<(usize, Self)> {
+        if basis_gate.dim() != 2 {
+            return Err(KanaError::DimensionMismatch {
+                expected: 2,
+                got: basis_gate.dim(),
+            });
+        }
+        // Apply basis rotation, measure in computational basis, rotate back
+        let mut rotated = self.clone();
+        crate::circuit::Circuit::apply_single_qubit_direct(&mut rotated, basis_gate, qubit);
+        let (bit, mut collapsed) = rotated.measure_qubit(qubit, r)?;
+        // Rotate back: apply basis_gate†
+        let basis_inv = basis_gate.dagger();
+        crate::circuit::Circuit::apply_single_qubit_direct(&mut collapsed, &basis_inv, qubit);
+        Ok((bit, collapsed))
     }
 
     /// Bloch sphere representation for a single-qubit state.

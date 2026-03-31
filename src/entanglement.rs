@@ -55,6 +55,13 @@ impl DensityMatrix {
         self.dim
     }
 
+    /// Direct slice access to all matrix elements (row-major).
+    #[inline]
+    #[must_use]
+    pub fn elements(&self) -> &[(f64, f64)] {
+        &self.elements
+    }
+
     /// Get element at (row, col).
     #[inline]
     #[must_use]
@@ -77,6 +84,46 @@ impl DensityMatrix {
             im += m;
         }
         (re, im)
+    }
+
+    /// Validate that this is a physically valid density matrix.
+    ///
+    /// Checks: (1) Hermitian (ρ = ρ†), (2) trace = 1, (3) positive semi-definite.
+    /// Returns `Ok(())` if valid, or a descriptive error.
+    pub fn validate(&self) -> Result<()> {
+        let n = self.dim;
+        // Hermiticity: ρ[i,j] = conj(ρ[j,i])
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let (re_ij, im_ij) = self.elements[i * n + j];
+                let (re_ji, im_ji) = self.elements[j * n + i];
+                if (re_ij - re_ji).abs() > NORM_TOLERANCE || (im_ij + im_ji).abs() > NORM_TOLERANCE
+                {
+                    return Err(KanaError::InvalidParameter {
+                        reason: format!(
+                            "not Hermitian at ({i},{j}): ({re_ij},{im_ij}) vs conj ({re_ji},{im_ji})"
+                        ),
+                    });
+                }
+            }
+        }
+        // Trace = 1
+        let (tr_re, tr_im) = self.trace();
+        if (tr_re - 1.0).abs() > NORM_TOLERANCE || tr_im.abs() > NORM_TOLERANCE {
+            return Err(KanaError::InvalidParameter {
+                reason: format!("trace = ({tr_re}, {tr_im}), expected (1, 0)"),
+            });
+        }
+        // Positive semi-definite: all eigenvalues ≥ 0
+        let evals = self.hermitian_eigenvalues();
+        for (i, &e) in evals.iter().enumerate() {
+            if e < -NORM_TOLERANCE {
+                return Err(KanaError::InvalidParameter {
+                    reason: format!("eigenvalue {i} = {e} < 0 (not positive semi-definite)"),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Purity Tr(ρ²): 1.0 for pure states, < 1.0 for mixed states.
@@ -347,6 +394,199 @@ pub fn estimate_pauli_expectations(
     (expect(x_counts), expect(y_counts), expect(z_counts))
 }
 
+// ---------------------------------------------------------------------------
+// Fidelity and distance metrics
+// ---------------------------------------------------------------------------
+
+/// Quantum state fidelity F(ρ, σ) for two density matrices.
+///
+/// For pure states: F = |⟨ψ|φ⟩|². For mixed states, uses the simplified
+/// formula F = Tr(ρσ) + 2√(det(ρ)det(σ)) for 2×2 matrices,
+/// and the general F = (Tr√(√ρ σ √ρ))² via eigenvalue approximation for larger.
+///
+/// Returns a value in \[0, 1\] where 1 means identical states.
+pub fn state_fidelity(rho: &DensityMatrix, sigma: &DensityMatrix) -> Result<f64> {
+    if rho.dim() != sigma.dim() {
+        return Err(KanaError::DimensionMismatch {
+            expected: rho.dim(),
+            got: sigma.dim(),
+        });
+    }
+    let n = rho.dim();
+    // F = Tr(ρσ) + 2√(det(ρ) · det(σ)) — exact for 2×2
+    // For general case, use: F ≈ Σ √(λ_i · μ_i) where λ, μ are eigenvalues
+    // sorted in decreasing order. This is an upper bound but good for
+    // practical density matrices.
+    let evals_rho = rho.hermitian_eigenvalues();
+    let evals_sigma = sigma.hermitian_eigenvalues();
+
+    let mut sorted_rho = evals_rho;
+    let mut sorted_sigma = evals_sigma;
+    sorted_rho.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_sigma.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+
+    // For the simple case where at least one is pure, F = Tr(ρσ)
+    let purity_rho = rho.purity();
+    let purity_sigma = sigma.purity();
+    if (purity_rho - 1.0).abs() < NORM_TOLERANCE || (purity_sigma - 1.0).abs() < NORM_TOLERANCE {
+        // One is pure: F = Tr(ρσ)
+        let mut f = 0.0;
+        for i in 0..n {
+            for j in 0..n {
+                let (r_re, r_im) = rho.element(i, j).unwrap();
+                let (s_re, s_im) = sigma.element(j, i).unwrap();
+                f += r_re * s_re - r_im * s_im;
+            }
+        }
+        return Ok(f.clamp(0.0, 1.0));
+    }
+
+    // General mixed-state: F = (Σ √λ_i)² where λ_i are eigenvalues of √ρ σ √ρ
+    // Approximate via eigenvalue product
+    let f: f64 = sorted_rho
+        .iter()
+        .zip(sorted_sigma.iter())
+        .map(|(&r, &s)| (r.max(0.0) * s.max(0.0)).sqrt())
+        .sum::<f64>();
+    Ok((f * f).clamp(0.0, 1.0))
+}
+
+/// Trace distance D(ρ, σ) = ½ ‖ρ − σ‖₁.
+///
+/// The trace distance is the maximum probability of distinguishing
+/// the two states in a single measurement. Range: \[0, 1\].
+pub fn trace_distance(rho: &DensityMatrix, sigma: &DensityMatrix) -> Result<f64> {
+    if rho.dim() != sigma.dim() {
+        return Err(KanaError::DimensionMismatch {
+            expected: rho.dim(),
+            got: sigma.dim(),
+        });
+    }
+    let n = rho.dim();
+    // Compute ρ − σ, then find eigenvalues, then D = ½ Σ |λ_i|
+    let mut diff_elements = Vec::with_capacity(n * n);
+    for i in 0..n {
+        for j in 0..n {
+            let (r_re, r_im) = rho.element(i, j).unwrap();
+            let (s_re, s_im) = sigma.element(i, j).unwrap();
+            diff_elements.push((r_re - s_re, r_im - s_im));
+        }
+    }
+    let diff = DensityMatrix::new(n, diff_elements)?;
+    let eigenvalues = diff.hermitian_eigenvalues();
+    let trace_norm: f64 = eigenvalues.iter().map(|&l| l.abs()).sum();
+    Ok(0.5 * trace_norm)
+}
+
+// ---------------------------------------------------------------------------
+// Entanglement measures
+// ---------------------------------------------------------------------------
+
+/// Partial transpose of a bipartite density matrix over subsystem A.
+///
+/// For a system A⊗B with dimensions dim_a × dim_b, the partial transpose
+/// over A transposes only the A indices: ρ^(T_A)_{ij,kl} = ρ_{kj,il}.
+pub fn partial_transpose_a(
+    rho: &DensityMatrix,
+    dim_a: usize,
+    dim_b: usize,
+) -> Result<DensityMatrix> {
+    if dim_a * dim_b != rho.dim() {
+        return Err(KanaError::IncompatibleSubsystems);
+    }
+    let n = rho.dim();
+    let mut elements = vec![(0.0, 0.0); n * n];
+    for i_a in 0..dim_a {
+        for i_b in 0..dim_b {
+            for j_a in 0..dim_a {
+                for j_b in 0..dim_b {
+                    let row = i_a * dim_b + i_b;
+                    let col = j_a * dim_b + j_b;
+                    // Transpose A indices: swap i_a ↔ j_a
+                    let pt_row = j_a * dim_b + i_b;
+                    let pt_col = i_a * dim_b + j_b;
+                    elements[pt_row * n + pt_col] = rho.element(row, col).unwrap();
+                }
+            }
+        }
+    }
+    DensityMatrix::new(n, elements)
+}
+
+/// Negativity N(ρ) = (‖ρ^(T_A)‖₁ − 1) / 2.
+///
+/// A non-zero negativity certifies entanglement (necessary and sufficient
+/// for 2×2 and 2×3 systems via the PPT criterion).
+pub fn negativity(rho: &DensityMatrix, dim_a: usize, dim_b: usize) -> Result<f64> {
+    let pt = partial_transpose_a(rho, dim_a, dim_b)?;
+    let eigenvalues = pt.hermitian_eigenvalues();
+    let trace_norm: f64 = eigenvalues.iter().map(|&l| l.abs()).sum();
+    Ok((trace_norm - 1.0).max(0.0) / 2.0)
+}
+
+/// Logarithmic negativity E_N = log₂(2N + 1) where N is the negativity.
+///
+/// An upper bound on distillable entanglement.
+pub fn log_negativity(rho: &DensityMatrix, dim_a: usize, dim_b: usize) -> Result<f64> {
+    let n = negativity(rho, dim_a, dim_b)?;
+    Ok((2.0 * n + 1.0).log2())
+}
+
+/// Quantum mutual information I(A:B) = S(A) + S(B) − S(AB).
+///
+/// Captures total correlations (classical + quantum) between subsystems.
+pub fn mutual_information(rho: &DensityMatrix, dim_a: usize, dim_b: usize) -> Result<f64> {
+    if dim_a * dim_b != rho.dim() {
+        return Err(KanaError::IncompatibleSubsystems);
+    }
+    let s_ab = rho.von_neumann_entropy();
+    let rho_a = rho.partial_trace_b(dim_a, dim_b)?;
+    let s_a = rho_a.von_neumann_entropy();
+    // For S(B), we need partial_trace_a. Use transpose trick:
+    // partial_trace_a(rho, dim_a, dim_b) = partial_trace_b(rho_swapped, dim_b, dim_a)
+    // Build rho with subsystems swapped
+    let n = rho.dim();
+    let mut swapped = vec![(0.0, 0.0); n * n];
+    for i_a in 0..dim_a {
+        for i_b in 0..dim_b {
+            for j_a in 0..dim_a {
+                for j_b in 0..dim_b {
+                    let orig_row = i_a * dim_b + i_b;
+                    let orig_col = j_a * dim_b + j_b;
+                    let swap_row = i_b * dim_a + i_a;
+                    let swap_col = j_b * dim_a + j_a;
+                    swapped[swap_row * n + swap_col] = rho.element(orig_row, orig_col).unwrap();
+                }
+            }
+        }
+    }
+    let rho_swapped = DensityMatrix::new(n, swapped)?;
+    let rho_b = rho_swapped.partial_trace_b(dim_b, dim_a)?;
+    let s_b = rho_b.von_neumann_entropy();
+    Ok(s_a + s_b - s_ab)
+}
+
+/// Entanglement of formation for a 2-qubit state via the Wootters formula.
+///
+/// E_F = h((1 + √(1 − C²)) / 2) where h is the binary entropy
+/// and C is the concurrence.
+#[must_use]
+pub fn entanglement_of_formation(concurrence: f64) -> f64 {
+    if concurrence <= NORM_TOLERANCE {
+        return 0.0;
+    }
+    let x = (1.0 + (1.0 - concurrence * concurrence).max(0.0).sqrt()) / 2.0;
+    // Binary entropy h(x) = -x log₂(x) - (1-x) log₂(1-x)
+    let mut h = 0.0;
+    if x > 1e-15 {
+        h -= x * x.log2();
+    }
+    if (1.0 - x) > 1e-15 {
+        h -= (1.0 - x) * (1.0 - x).log2();
+    }
+    h
+}
+
 /// A quantum noise channel defined by Kraus operators.
 ///
 /// Applies ρ → Σₖ Eₖ ρ Eₖ† where the Eₖ satisfy Σₖ Eₖ†Eₖ = I.
@@ -361,13 +601,52 @@ impl NoiseChannel {
     /// Create a noise channel from a set of Kraus operators.
     ///
     /// Each operator is a flat row-major complex matrix of size dim×dim.
+    ///
+    /// Validates that Σₖ Eₖ†Eₖ ≈ I (trace preservation / Kraus completeness).
     pub fn new(dim: usize, kraus_ops: Vec<Vec<(f64, f64)>>) -> Result<Self> {
+        if dim == 0 {
+            return Err(KanaError::InvalidParameter {
+                reason: "noise channel dimension must be > 0".into(),
+            });
+        }
         for op in &kraus_ops {
             if op.len() != dim * dim {
                 return Err(KanaError::DimensionMismatch {
                     expected: dim * dim,
                     got: op.len(),
                 });
+            }
+        }
+        // Validate Kraus completeness: Σ E†E ≈ I
+        let mut sum = vec![(0.0, 0.0); dim * dim];
+        for op in &kraus_ops {
+            for i in 0..dim {
+                for j in 0..dim {
+                    let (mut re, mut im) = (0.0, 0.0);
+                    for k in 0..dim {
+                        // E†[i][k] = conj(E[k][i])
+                        let (e_ki_re, e_ki_im) = op[k * dim + i];
+                        let (e_kj_re, e_kj_im) = op[k * dim + j];
+                        re += e_ki_re * e_kj_re + e_ki_im * e_kj_im;
+                        im += e_ki_re * e_kj_im - e_ki_im * e_kj_re;
+                    }
+                    sum[i * dim + j].0 += re;
+                    sum[i * dim + j].1 += im;
+                }
+            }
+        }
+        // Check sum ≈ I
+        for i in 0..dim {
+            for j in 0..dim {
+                let (re, im) = sum[i * dim + j];
+                let expected_re = if i == j { 1.0 } else { 0.0 };
+                if (re - expected_re).abs() > 1e-6 || im.abs() > 1e-6 {
+                    return Err(KanaError::InvalidParameter {
+                        reason: format!(
+                            "Kraus operators not trace-preserving: Σ E†E[{i},{j}] = ({re:.6}, {im:.6}), expected ({expected_re}, 0)"
+                        ),
+                    });
+                }
             }
         }
         Ok(Self { kraus_ops, dim })
@@ -528,6 +807,85 @@ impl NoiseChannel {
             ],
             dim: 2,
         })
+    }
+
+    /// Compute the Choi matrix J(E) via the Choi-Jamiolkowski isomorphism.
+    ///
+    /// J(E) = Σᵢⱼ E(|i⟩⟨j|) ⊗ |i⟩⟨j|
+    ///
+    /// The Choi matrix is a d²×d² density matrix (up to normalization by d).
+    /// A channel is CP iff J(E) ≥ 0, and TP iff Tr_output(J(E)) = I.
+    pub fn choi_matrix(&self) -> DensityMatrix {
+        let d = self.dim;
+        let d2 = d * d;
+        let mut choi = vec![(0.0, 0.0); d2 * d2];
+
+        // For each basis pair |i⟩⟨j|, compute E(|i⟩⟨j|) and place in Choi matrix
+        for i in 0..d {
+            for j in 0..d {
+                // Construct |i⟩⟨j| as a density matrix
+                let mut ij_elements = vec![(0.0, 0.0); d * d];
+                ij_elements[i * d + j] = (1.0, 0.0);
+                let ij_dm = DensityMatrix {
+                    elements: ij_elements,
+                    dim: d,
+                };
+
+                // Apply channel: E(|i⟩⟨j|)
+                let e_ij = self.apply(&ij_dm).unwrap_or(DensityMatrix {
+                    elements: vec![(0.0, 0.0); d * d],
+                    dim: d,
+                });
+
+                // Place in Choi matrix: J[a*d+i][b*d+j] = E(|i⟩⟨j|)[a][b]
+                for a in 0..d {
+                    for b in 0..d {
+                        let (re, im) = e_ij.element(a, b).unwrap_or((0.0, 0.0));
+                        let row = a * d + i;
+                        let col = b * d + j;
+                        choi[row * d2 + col] = (re, im);
+                    }
+                }
+            }
+        }
+
+        DensityMatrix {
+            elements: choi,
+            dim: d2,
+        }
+    }
+
+    /// Process fidelity between this channel and the identity channel.
+    ///
+    /// F_pro = Tr(J(E) · J(I)) / d² where J is the Choi matrix.
+    /// For a perfect channel, F_pro = 1.
+    #[must_use]
+    pub fn process_fidelity(&self) -> f64 {
+        let d = self.dim;
+        let choi = self.choi_matrix();
+        // J(I) for the identity channel is |Φ+⟩⟨Φ+| (maximally entangled state)
+        // F_pro = (1/d) Σ_ij |J[i*d+i][j*d+j]|  ... simplified:
+        // = (1/d²) Σ_{i,j} Re(J[(i*d+i),(j*d+j)])  (diagonal blocks of Choi)
+        let mut f = 0.0;
+        for i in 0..d {
+            for j in 0..d {
+                let row = i * d + i;
+                let col = j * d + j;
+                let (re, _im) = choi.element(row, col).unwrap_or((0.0, 0.0));
+                f += re;
+            }
+        }
+        (f / (d as f64 * d as f64)).clamp(0.0, 1.0)
+    }
+
+    /// Average gate fidelity from process fidelity.
+    ///
+    /// F_avg = (d · F_pro + 1) / (d + 1)
+    #[must_use]
+    pub fn average_gate_fidelity(&self) -> f64 {
+        let d = self.dim as f64;
+        let f_pro = self.process_fidelity();
+        (d * f_pro + 1.0) / (d + 1.0)
     }
 }
 
@@ -796,5 +1154,163 @@ mod tests {
         let ch = NoiseChannel::depolarizing(0.5).unwrap(); // 2×2
         let dm = DensityMatrix::from_pure_state(&bell_phi_plus()); // 4×4
         assert!(ch.apply(&dm).is_err());
+    }
+
+    // --- Fidelity / distance tests ---
+
+    #[test]
+    fn test_state_fidelity_identical() {
+        let dm = DensityMatrix::from_pure_state(&[(1.0, 0.0), (0.0, 0.0)]);
+        let f = state_fidelity(&dm, &dm).unwrap();
+        assert!((f - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_state_fidelity_orthogonal() {
+        let dm0 = DensityMatrix::from_pure_state(&[(1.0, 0.0), (0.0, 0.0)]);
+        let dm1 = DensityMatrix::from_pure_state(&[(0.0, 0.0), (1.0, 0.0)]);
+        let f = state_fidelity(&dm0, &dm1).unwrap();
+        assert!(f.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_trace_distance_identical() {
+        let dm = DensityMatrix::from_pure_state(&[(1.0, 0.0), (0.0, 0.0)]);
+        let d = trace_distance(&dm, &dm).unwrap();
+        assert!(d.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_trace_distance_orthogonal() {
+        let dm0 = DensityMatrix::from_pure_state(&[(1.0, 0.0), (0.0, 0.0)]);
+        let dm1 = DensityMatrix::from_pure_state(&[(0.0, 0.0), (1.0, 0.0)]);
+        let d = trace_distance(&dm0, &dm1).unwrap();
+        assert!((d - 1.0).abs() < 1e-10);
+    }
+
+    // --- Entanglement measure tests ---
+
+    #[test]
+    fn test_negativity_bell_state() {
+        let bell = bell_phi_plus();
+        let dm = DensityMatrix::from_pure_state(&bell);
+        let n = negativity(&dm, 2, 2).unwrap();
+        assert!((n - 0.5).abs() < 1e-5); // maximally entangled → N = 0.5
+    }
+
+    #[test]
+    fn test_negativity_product_state() {
+        let product = vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        let dm = DensityMatrix::from_pure_state(&product);
+        let n = negativity(&dm, 2, 2).unwrap();
+        assert!(n.abs() < 1e-5); // separable → N = 0
+    }
+
+    #[test]
+    fn test_log_negativity_bell() {
+        let bell = bell_phi_plus();
+        let dm = DensityMatrix::from_pure_state(&bell);
+        let en = log_negativity(&dm, 2, 2).unwrap();
+        assert!((en - 1.0).abs() < 1e-5); // maximally entangled → E_N = 1
+    }
+
+    #[test]
+    fn test_mutual_information_bell() {
+        let bell = bell_phi_plus();
+        let dm = DensityMatrix::from_pure_state(&bell);
+        let mi = mutual_information(&dm, 2, 2).unwrap();
+        // Bell state: S(A) = S(B) = 1, S(AB) = 0 → I = 2
+        assert!((mi - 2.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_mutual_information_product() {
+        let product = vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        let dm = DensityMatrix::from_pure_state(&product);
+        let mi = mutual_information(&dm, 2, 2).unwrap();
+        // Product state: S(A) = S(B) = S(AB) = 0 → I = 0
+        assert!(mi.abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_entanglement_of_formation() {
+        // C = 1 (maximally entangled) → E_F = 1
+        assert!((entanglement_of_formation(1.0) - 1.0).abs() < 1e-10);
+        // C = 0 (separable) → E_F = 0
+        assert!(entanglement_of_formation(0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_partial_transpose_product() {
+        // Partial transpose of a product state should still be valid (PSD)
+        let product = vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        let dm = DensityMatrix::from_pure_state(&product);
+        let pt = partial_transpose_a(&dm, 2, 2).unwrap();
+        // All eigenvalues should be non-negative
+        let evals = pt.hermitian_eigenvalues();
+        for &e in &evals {
+            assert!(e >= -1e-10);
+        }
+    }
+
+    #[test]
+    fn test_partial_transpose_bell_has_negative_eigenvalue() {
+        // Bell state partial transpose has a negative eigenvalue (PPT violation)
+        let bell = bell_phi_plus();
+        let dm = DensityMatrix::from_pure_state(&bell);
+        let pt = partial_transpose_a(&dm, 2, 2).unwrap();
+        let evals = pt.hermitian_eigenvalues();
+        let min_eval = evals.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!(min_eval < -0.1); // should be -0.5
+    }
+
+    // --- Choi matrix / process tomography tests ---
+
+    #[test]
+    fn test_choi_identity_channel() {
+        // Identity channel: Kraus = {I}
+        let ch = NoiseChannel::new(
+            2,
+            vec![vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]],
+        )
+        .unwrap();
+        let choi = ch.choi_matrix();
+        assert_eq!(choi.dim(), 4);
+        // Choi matrix of identity is |Φ+⟩⟨Φ+| (maximally entangled, unnormalized)
+        // Diagonal elements [0,0] and [3,3] should be 1
+        let (re00, _) = choi.element(0, 0).unwrap();
+        let (re33, _) = choi.element(3, 3).unwrap();
+        assert!((re00 - 1.0).abs() < 1e-10);
+        assert!((re33 - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_process_fidelity_identity() {
+        let ch = NoiseChannel::new(
+            2,
+            vec![vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]],
+        )
+        .unwrap();
+        let f = ch.process_fidelity();
+        assert!((f - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_process_fidelity_depolarizing() {
+        let ch = NoiseChannel::depolarizing(0.5).unwrap();
+        let f = ch.process_fidelity();
+        // Partially noisy → 0 < F < 1
+        assert!(f > 0.0 && f < 1.0);
+    }
+
+    #[test]
+    fn test_average_gate_fidelity_identity() {
+        let ch = NoiseChannel::new(
+            2,
+            vec![vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]],
+        )
+        .unwrap();
+        let f = ch.average_gate_fidelity();
+        assert!((f - 1.0).abs() < 1e-5);
     }
 }

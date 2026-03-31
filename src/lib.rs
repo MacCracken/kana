@@ -29,6 +29,9 @@ pub mod entanglement;
 #[cfg(feature = "circuit")]
 pub mod circuit;
 
+#[cfg(all(feature = "state", feature = "operator", feature = "entanglement"))]
+pub mod dynamics;
+
 #[cfg(feature = "logging")]
 pub mod logging;
 
