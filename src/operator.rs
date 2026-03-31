@@ -22,6 +22,11 @@ pub struct Operator {
 impl Operator {
     /// Create an operator from a flat row-major complex matrix.
     pub fn new(dim: usize, elements: Vec<(f64, f64)>) -> Result<Self> {
+        if dim == 0 {
+            return Err(KanaError::InvalidParameter {
+                reason: "operator dimension must be > 0".into(),
+            });
+        }
         if elements.len() != dim * dim {
             return Err(KanaError::DimensionMismatch {
                 expected: dim * dim,
@@ -45,10 +50,7 @@ impl Operator {
     #[must_use]
     pub fn pauli_x() -> Self {
         Self {
-            elements: vec![
-                (0.0, 0.0), (1.0, 0.0),
-                (1.0, 0.0), (0.0, 0.0),
-            ],
+            elements: vec![(0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (0.0, 0.0)],
             dim: 2,
         }
     }
@@ -57,10 +59,7 @@ impl Operator {
     #[must_use]
     pub fn pauli_y() -> Self {
         Self {
-            elements: vec![
-                (0.0, 0.0), (0.0, -1.0),
-                (0.0, 1.0), (0.0, 0.0),
-            ],
+            elements: vec![(0.0, 0.0), (0.0, -1.0), (0.0, 1.0), (0.0, 0.0)],
             dim: 2,
         }
     }
@@ -69,10 +68,7 @@ impl Operator {
     #[must_use]
     pub fn pauli_z() -> Self {
         Self {
-            elements: vec![
-                (1.0, 0.0), (0.0, 0.0),
-                (0.0, 0.0), (-1.0, 0.0),
-            ],
+            elements: vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (-1.0, 0.0)],
             dim: 2,
         }
     }
@@ -82,10 +78,7 @@ impl Operator {
     pub fn hadamard() -> Self {
         let s = std::f64::consts::FRAC_1_SQRT_2;
         Self {
-            elements: vec![
-                (s, 0.0), (s, 0.0),
-                (s, 0.0), (-s, 0.0),
-            ],
+            elements: vec![(s, 0.0), (s, 0.0), (s, 0.0), (-s, 0.0)],
             dim: 2,
         }
     }
@@ -94,10 +87,7 @@ impl Operator {
     #[must_use]
     pub fn phase_s() -> Self {
         Self {
-            elements: vec![
-                (1.0, 0.0), (0.0, 0.0),
-                (0.0, 0.0), (0.0, 1.0),
-            ],
+            elements: vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 1.0)],
             dim: 2,
         }
     }
@@ -107,12 +97,205 @@ impl Operator {
     pub fn phase_t() -> Self {
         let s = std::f64::consts::FRAC_1_SQRT_2;
         Self {
-            elements: vec![
-                (1.0, 0.0), (0.0, 0.0),
-                (0.0, 0.0), (s, s),
-            ],
+            elements: vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (s, s)],
             dim: 2,
         }
+    }
+
+    /// Rotation around X axis: Rx(θ) = exp(−iθX/2).
+    ///
+    /// Rx(θ) = [[cos(θ/2), −i·sin(θ/2)], [−i·sin(θ/2), cos(θ/2)]]
+    #[must_use]
+    pub fn rx(theta: f64) -> Self {
+        let c = (theta / 2.0).cos();
+        let s = (theta / 2.0).sin();
+        Self {
+            elements: vec![(c, 0.0), (0.0, -s), (0.0, -s), (c, 0.0)],
+            dim: 2,
+        }
+    }
+
+    /// Rotation around Y axis: Ry(θ) = exp(−iθY/2).
+    ///
+    /// Ry(θ) = [[cos(θ/2), −sin(θ/2)], [sin(θ/2), cos(θ/2)]]
+    #[must_use]
+    pub fn ry(theta: f64) -> Self {
+        let c = (theta / 2.0).cos();
+        let s = (theta / 2.0).sin();
+        Self {
+            elements: vec![(c, 0.0), (-s, 0.0), (s, 0.0), (c, 0.0)],
+            dim: 2,
+        }
+    }
+
+    /// Rotation around Z axis: Rz(θ) = exp(−iθZ/2).
+    ///
+    /// Rz(θ) = [[e^(−iθ/2), 0], [0, e^(iθ/2)]]
+    #[must_use]
+    pub fn rz(theta: f64) -> Self {
+        let c = (theta / 2.0).cos();
+        let s = (theta / 2.0).sin();
+        Self {
+            elements: vec![(c, -s), (0.0, 0.0), (0.0, 0.0), (c, s)],
+            dim: 2,
+        }
+    }
+
+    /// Phase gate with arbitrary angle: |1⟩ → e^(iφ)|1⟩.
+    #[must_use]
+    pub fn phase(phi: f64) -> Self {
+        Self {
+            elements: vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (phi.cos(), phi.sin())],
+            dim: 2,
+        }
+    }
+
+    /// CNOT (controlled-X) gate on 2 qubits.
+    ///
+    /// |00⟩→|00⟩, |01⟩→|01⟩, |10⟩→|11⟩, |11⟩→|10⟩
+    /// Control is qubit 0, target is qubit 1.
+    #[must_use]
+    pub fn cnot() -> Self {
+        Self {
+            elements: vec![
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+            ],
+            dim: 4,
+        }
+    }
+
+    /// Controlled-Z gate on 2 qubits.
+    ///
+    /// |00⟩→|00⟩, |01⟩→|01⟩, |10⟩→|10⟩, |11⟩→−|11⟩
+    #[must_use]
+    pub fn cz() -> Self {
+        Self {
+            elements: vec![
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (-1.0, 0.0),
+            ],
+            dim: 4,
+        }
+    }
+
+    /// SWAP gate on 2 qubits.
+    ///
+    /// |00⟩→|00⟩, |01⟩→|10⟩, |10⟩→|01⟩, |11⟩→|11⟩
+    #[must_use]
+    pub fn swap() -> Self {
+        Self {
+            elements: vec![
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+            ],
+            dim: 4,
+        }
+    }
+
+    /// Toffoli gate (CCX / CCNOT) on 3 qubits.
+    ///
+    /// Flips qubit 2 iff qubits 0 and 1 are both |1⟩.
+    /// |110⟩→|111⟩, |111⟩→|110⟩, all others unchanged.
+    #[must_use]
+    pub fn toffoli() -> Self {
+        let mut elements = vec![(0.0, 0.0); 64];
+        // Identity on all basis states except |110⟩↔|111⟩
+        for i in 0..8 {
+            elements[i * 8 + i] = (1.0, 0.0);
+        }
+        // Swap |110⟩ (6) and |111⟩ (7)
+        elements[6 * 8 + 6] = (0.0, 0.0);
+        elements[7 * 8 + 7] = (0.0, 0.0);
+        elements[6 * 8 + 7] = (1.0, 0.0);
+        elements[7 * 8 + 6] = (1.0, 0.0);
+        Self { elements, dim: 8 }
+    }
+
+    /// Fredkin gate (CSWAP) on 3 qubits.
+    ///
+    /// Swaps qubits 1 and 2 iff qubit 0 is |1⟩.
+    /// |101⟩↔|110⟩, all others unchanged.
+    #[must_use]
+    pub fn fredkin() -> Self {
+        let mut elements = vec![(0.0, 0.0); 64];
+        for i in 0..8 {
+            elements[i * 8 + i] = (1.0, 0.0);
+        }
+        // Swap |101⟩ (5) and |110⟩ (6)
+        elements[5 * 8 + 5] = (0.0, 0.0);
+        elements[6 * 8 + 6] = (0.0, 0.0);
+        elements[5 * 8 + 6] = (1.0, 0.0);
+        elements[6 * 8 + 5] = (1.0, 0.0);
+        Self { elements, dim: 8 }
+    }
+
+    /// Build a controlled-U gate from a single-qubit operator.
+    ///
+    /// Returns a 4×4 operator: applies U to the target qubit when
+    /// the control qubit is |1⟩. Control is qubit 0, target is qubit 1.
+    pub fn controlled(u: &Self) -> Result<Self> {
+        if u.dim != 2 {
+            return Err(KanaError::DimensionMismatch {
+                expected: 2,
+                got: u.dim,
+            });
+        }
+        // |0⟩⟨0| ⊗ I + |1⟩⟨1| ⊗ U
+        let mut elements = vec![(0.0, 0.0); 16];
+        // Top-left 2×2: identity (control=0)
+        elements[0] = (1.0, 0.0); // (0,0)
+        elements[1] = (0.0, 0.0); // (0,1)
+        elements[4] = (0.0, 0.0); // (1,0)
+        elements[5] = (1.0, 0.0); // (1,1)
+        // Bottom-right 2×2: U (control=1)
+        elements[10] = u.elements[0]; // (2,2) = U[0,0]
+        elements[11] = u.elements[1]; // (2,3) = U[0,1]
+        elements[14] = u.elements[2]; // (3,2) = U[1,0]
+        elements[15] = u.elements[3]; // (3,3) = U[1,1]
+        Ok(Self { elements, dim: 4 })
     }
 
     /// Dimension of this operator.
@@ -120,6 +303,13 @@ impl Operator {
     #[must_use]
     pub fn dim(&self) -> usize {
         self.dim
+    }
+
+    /// Direct slice access to all matrix elements (row-major).
+    #[inline]
+    #[must_use]
+    pub fn elements(&self) -> &[(f64, f64)] {
+        &self.elements
     }
 
     /// Get element at (row, col).
@@ -134,6 +324,7 @@ impl Operator {
     }
 
     /// Apply this operator to a state vector: |ψ'⟩ = U|ψ⟩.
+    #[inline]
     pub fn apply(&self, state: &StateVector) -> Result<StateVector> {
         if self.dim != state.dimension() {
             return Err(KanaError::DimensionMismatch {
@@ -141,22 +332,28 @@ impl Operator {
                 got: state.dimension(),
             });
         }
+        let amps = state.amplitudes();
         let mut result = vec![(0.0, 0.0); self.dim];
-        for i in 0..self.dim {
+        for (i, slot) in result.iter_mut().enumerate() {
             let (mut re, mut im) = (0.0, 0.0);
-            for j in 0..self.dim {
-                let (m_re, m_im) = self.elements[i * self.dim + j];
-                if let Some((s_re, s_im)) = state.amplitude(j) {
-                    re += m_re * s_re - m_im * s_im;
-                    im += m_re * s_im + m_im * s_re;
-                }
+            let row_start = i * self.dim;
+            for (j, &(s_re, s_im)) in amps.iter().enumerate() {
+                let (m_re, m_im) = self.elements[row_start + j];
+                re += m_re * s_re - m_im * s_im;
+                im += m_re * s_im + m_im * s_re;
             }
-            result[i] = (re, im);
+            *slot = (re, im);
         }
-        StateVector::new(result).map_err(|_| KanaError::NotUnitary { deviation: 0.0 })
+        StateVector::new(result).map_err(|e| match e {
+            KanaError::NotNormalized { norm } => KanaError::NotUnitary {
+                deviation: (norm - 1.0).abs(),
+            },
+            other => other,
+        })
     }
 
     /// Compute the conjugate transpose (dagger) U†.
+    #[inline]
     #[must_use]
     pub fn dagger(&self) -> Self {
         let mut elements = vec![(0.0, 0.0); self.dim * self.dim];
@@ -173,6 +370,7 @@ impl Operator {
     }
 
     /// Multiply two operators: C = A × B.
+    #[inline]
     pub fn multiply(&self, other: &Self) -> Result<Self> {
         if self.dim != other.dim {
             return Err(KanaError::DimensionMismatch {
@@ -210,10 +408,8 @@ impl Operator {
                         let (b_re, b_im) = other.elements[k * other.dim + l];
                         let row = i * other.dim + k;
                         let col = j * other.dim + l;
-                        elements[row * new_dim + col] = (
-                            a_re * b_re - a_im * b_im,
-                            a_re * b_im + a_im * b_re,
-                        );
+                        elements[row * new_dim + col] =
+                            (a_re * b_re - a_im * b_im, a_re * b_im + a_im * b_re);
                     }
                 }
             }
@@ -331,5 +527,144 @@ mod tests {
     fn test_phase_t() {
         let t = Operator::phase_t();
         assert_eq!(t.dim(), 2);
+    }
+
+    #[test]
+    fn test_cnot_computational_basis() {
+        let cnot = Operator::cnot();
+        assert_eq!(cnot.dim(), 4);
+        // |00⟩ → |00⟩
+        let s00 = StateVector::zero(2);
+        let r00 = cnot.apply(&s00).unwrap();
+        assert!((r00.probability(0).unwrap() - 1.0).abs() < 1e-10);
+
+        // |10⟩ → |11⟩
+        let s10 = StateVector::new(vec![(0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (0.0, 0.0)]).unwrap();
+        let r10 = cnot.apply(&s10).unwrap();
+        assert!((r10.probability(3).unwrap() - 1.0).abs() < 1e-10);
+
+        // |11⟩ → |10⟩
+        let s11 = StateVector::new(vec![(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]).unwrap();
+        let r11 = cnot.apply(&s11).unwrap();
+        assert!((r11.probability(2).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cnot_involution() {
+        let cnot = Operator::cnot();
+        let cnot2 = cnot.multiply(&cnot).unwrap();
+        // CNOT² = I
+        let id = Operator::identity(4);
+        for i in 0..4 {
+            for j in 0..4 {
+                let (a_re, a_im) = cnot2.element(i, j).unwrap();
+                let (b_re, b_im) = id.element(i, j).unwrap();
+                assert!((a_re - b_re).abs() < 1e-10);
+                assert!((a_im - b_im).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn test_cz_gate() {
+        let cz = Operator::cz();
+        assert_eq!(cz.dim(), 4);
+        // |11⟩ → −|11⟩
+        let s11 = StateVector::new(vec![(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)]).unwrap();
+        let r = cz.apply(&s11).unwrap();
+        let (re, im) = r.amplitude(3).unwrap();
+        assert!((re - (-1.0)).abs() < 1e-10);
+        assert!(im.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_swap_gate() {
+        let swap = Operator::swap();
+        // |01⟩ → |10⟩
+        let s01 = StateVector::new(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]).unwrap();
+        let r = swap.apply(&s01).unwrap();
+        assert!((r.probability(2).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_toffoli() {
+        let tof = Operator::toffoli();
+        assert_eq!(tof.dim(), 8);
+        // |110⟩ (idx 6) → |111⟩ (idx 7)
+        let mut amps = vec![(0.0, 0.0); 8];
+        amps[6] = (1.0, 0.0);
+        let s = StateVector::new(amps).unwrap();
+        let r = tof.apply(&s).unwrap();
+        assert!((r.probability(7).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_toffoli_no_flip() {
+        let tof = Operator::toffoli();
+        // |100⟩ (idx 4) → |100⟩ (control_b is 0, no flip)
+        let mut amps = vec![(0.0, 0.0); 8];
+        amps[4] = (1.0, 0.0);
+        let s = StateVector::new(amps).unwrap();
+        let r = tof.apply(&s).unwrap();
+        assert!((r.probability(4).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_toffoli_involution() {
+        let tof = Operator::toffoli();
+        let tof2 = tof.multiply(&tof).unwrap();
+        let id = Operator::identity(8);
+        for i in 0..8 {
+            for j in 0..8 {
+                let (a_re, a_im) = tof2.element(i, j).unwrap();
+                let (b_re, b_im) = id.element(i, j).unwrap();
+                assert!((a_re - b_re).abs() < 1e-10);
+                assert!((a_im - b_im).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn test_fredkin() {
+        let fred = Operator::fredkin();
+        assert_eq!(fred.dim(), 8);
+        // |101⟩ (idx 5) → |110⟩ (idx 6)
+        let mut amps = vec![(0.0, 0.0); 8];
+        amps[5] = (1.0, 0.0);
+        let s = StateVector::new(amps).unwrap();
+        let r = fred.apply(&s).unwrap();
+        assert!((r.probability(6).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_fredkin_no_swap() {
+        let fred = Operator::fredkin();
+        // |010⟩ (idx 2) → |010⟩ (control is 0, no swap)
+        let mut amps = vec![(0.0, 0.0); 8];
+        amps[2] = (1.0, 0.0);
+        let s = StateVector::new(amps).unwrap();
+        let r = fred.apply(&s).unwrap();
+        assert!((r.probability(2).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_controlled_u() {
+        // Controlled-Z = CZ
+        let cz_built = Operator::controlled(&Operator::pauli_z()).unwrap();
+        let cz = Operator::cz();
+        for i in 0..4 {
+            for j in 0..4 {
+                let (a_re, a_im) = cz_built.element(i, j).unwrap();
+                let (b_re, b_im) = cz.element(i, j).unwrap();
+                assert!((a_re - b_re).abs() < 1e-10);
+                assert!((a_im - b_im).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn test_controlled_u_dimension_check() {
+        let id4 = Operator::identity(4);
+        assert!(Operator::controlled(&id4).is_err());
     }
 }

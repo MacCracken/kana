@@ -53,22 +53,31 @@ impl DaimonClient {
             "name": "kana",
             "capabilities": ["quantum_state", "operators", "entanglement", "circuits"],
         });
-        let resp = self
+        let mut req = self
             .client
             .post(format!("{}/v1/agents/register", self.config.endpoint))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| KanaError::InvalidParameter {
-                reason: format!("registration request failed: {e}"),
-            })?;
+            .json(&body);
+        if let Some(ref key) = self.config.api_key {
+            req = req.header("Authorization", format!("Bearer {key}"));
+        }
+        let resp = req.send().await.map_err(|e| KanaError::InvalidParameter {
+            reason: format!("registration request failed: {e}"),
+        })?;
+        if !resp.status().is_success() {
+            return Err(KanaError::InvalidParameter {
+                reason: format!("registration failed with status {}", resp.status()),
+            });
+        }
         let data: serde_json::Value =
-            resp.json()
-                .await
-                .map_err(|e| KanaError::InvalidParameter {
-                    reason: format!("invalid registration response: {e}"),
-                })?;
-        Ok(data["agent_id"].as_str().unwrap_or("unknown").to_string())
+            resp.json().await.map_err(|e| KanaError::InvalidParameter {
+                reason: format!("invalid registration response: {e}"),
+            })?;
+        data["agent_id"]
+            .as_str()
+            .map(String::from)
+            .ok_or_else(|| KanaError::InvalidParameter {
+                reason: "registration response missing 'agent_id' field".into(),
+            })
     }
 }
 

@@ -35,4 +35,16 @@ pub mod logging;
 #[cfg(feature = "ai")]
 pub mod ai;
 
-pub use error::KanaError;
+pub use error::{KanaError, Result};
+
+#[cfg(feature = "state")]
+pub use state::{NORM_TOLERANCE, StateVector};
+
+#[cfg(feature = "operator")]
+pub use operator::Operator;
+
+#[cfg(feature = "entanglement")]
+pub use entanglement::DensityMatrix;
+
+#[cfg(feature = "circuit")]
+pub use circuit::Circuit;
