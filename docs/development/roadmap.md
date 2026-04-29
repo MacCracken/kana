@@ -72,8 +72,6 @@
 
 ## V2.0 — Advanced Compilation & Simulation
 
-### In-scope (kana owns)
-
 - [ ] Mixed-state concurrence (Wootters formula)
 - [ ] Steady-state Lindblad solver
 - [ ] Monte Carlo wave function trajectories
@@ -82,14 +80,11 @@
 - [ ] Full KAK decomposition with local unitaries
 - [ ] Commutation analysis in optimizer
 - [ ] SIMD-optimized amplitude pair iteration
-
-### Separate crates (kana-*)
-
-- [ ] `kana-compile` — DAG-based circuit IR, pass manager, routing, template matching
-- [ ] `kana-stab` — Stabilizer tableau simulator (Gottesman-Knill, QEC)
-- [ ] `kana-mps` — MPS/tensor network simulation backend
-- [ ] `kana-qasm` — Full OpenQASM 3.0 parser + importer (use `oq3_parser`)
-- [ ] `kana-autodiff` — Auto-differentiation for VQE/QAOA (via hisab autodiff bridge)
+- [ ] DAG-based circuit IR + pass manager (feature: `compile`)
+- [ ] Stabilizer tableau simulator, Gottesman-Knill (feature: `stabilizer`)
+- [ ] MPS / tensor network simulation backend (feature: `tensor-sim`)
+- [ ] OpenQASM 3.0 parser + importer (feature: `qasm-import`)
+- [ ] Auto-differentiation for VQE/QAOA (feature: `autodiff`, via hisab bridge)
 
 ## Consumer Mapping
 
